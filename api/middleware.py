@@ -35,6 +35,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             "/history/",
             "/strikes/",
             "/compare/",
+            "/options/",
             "/llm/chat",
             "/llm/feedback",
         )

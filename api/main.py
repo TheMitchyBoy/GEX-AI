@@ -13,6 +13,7 @@ from api.agent_ui import router as agent_ui_router
 from api.alerts import evaluate_alerts
 from api.llm_routes import router as llm_router
 from api.middleware import SecurityMiddleware, get_metrics
+from api.option_routes import router as option_router
 from db.connection import get_connection, require_database_url
 from db.features import enrich_snapshot_metrics
 from db.loader import load_snapshot_history
@@ -34,6 +35,7 @@ from models.predict import predict_next_snapshot, similar_setups
 app = FastAPI(title="GEX Prediction API", version="2.0.0")
 app.include_router(agent_ui_router)
 app.include_router(llm_router)
+app.include_router(option_router)
 app.add_middleware(SecurityMiddleware)
 app.add_middleware(
     CORSMiddleware,

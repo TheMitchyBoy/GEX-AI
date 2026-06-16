@@ -91,6 +91,16 @@ def run_once(ticker: str | None = None) -> dict[str, Any] | None:
     if alerts:
         send_alerts(alerts, ticker=ticker, ts=latest_ts)
 
+    if config.OPTION_LEARN_ON_POLL and config.OPTION_LEARN_ENABLED:
+        try:
+            from integrations.uw_client import is_configured
+            from services.option_pipeline import run_option_cycle
+
+            if is_configured():
+                run_option_cycle(ticker)
+        except Exception:
+            logger.debug("Option learn cycle skipped", exc_info=True)
+
     out = {"latest_ts": latest_ts, "forecast": forecast, "llm": llm_result, "alerts": alerts}
     logger.info("Processed %s @ %s", ticker, latest_ts)
     return out

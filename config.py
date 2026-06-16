@@ -66,6 +66,23 @@ ONLINE_MIN_UPDATES = int(os.environ.get("ONLINE_MIN_UPDATES", "20"))
 MODELS_DIR = Path(os.environ.get("MODELS_DIR", str(Path(__file__).resolve().parent / "artifacts" / "models")))
 MULTI_HORIZONS = tuple(int(x) for x in os.environ.get("MULTI_HORIZONS", "1,3,6").split(",") if x.strip())
 
+# Unusual Whales API (https://api.unusualwhales.com)
+UW_API_KEY = os.environ.get("UW_API_KEY", "")
+UW_BASE_URL = os.environ.get("UW_BASE_URL", "https://api.unusualwhales.com")
+UW_TIMEOUT_SEC = float(os.environ.get("UW_TIMEOUT_SEC", "30"))
+UW_TICKER_MAP = {
+    pair.split(":", 1)[0].strip().upper(): pair.split(":", 1)[1].strip().upper()
+    for pair in os.environ.get("UW_TICKER_MAP", "SPX:SPX,SPY:SPY,NDX:NDX").split(",")
+    if ":" in pair
+}
+
+# Option price learning (DB GEX + UW quotes)
+OPTION_LEARN_ENABLED = os.environ.get("OPTION_LEARN_ENABLED", "1") in ("1", "true", "True")
+OPTION_LEARN_ON_POLL = os.environ.get("OPTION_LEARN_ON_POLL", "1") in ("1", "true", "True")
+OPTION_POLL_SEC = int(os.environ.get("OPTION_POLL_SEC", os.environ.get("FORECAST_POLL_SEC", "60")))
+OPTION_MIN_TRAIN_ROWS = int(os.environ.get("OPTION_MIN_TRAIN_ROWS", "12"))
+OPTION_MIN_UPDATES = int(os.environ.get("OPTION_MIN_UPDATES", "15"))
+
 MIN_KNN_SNAPSHOTS = 4
 RECENCY_DECAY = 0.92
 SURFACE_BINS = 32

@@ -4,7 +4,7 @@ Standalone read-only analytics and prediction app for gamma exposure (GEX) data 
 
 ## Features
 
-- **Postgres consumer** — loads `snapshots` and `snapshot_strikes` (no CSV exports, no UW API key)
+- **Postgres consumer** — loads `snapshots` and `snapshot_strikes`; optional UW API for live option quotes
 - **Feature pipeline** — scalar regime features + 32-bin ATM surface vectors from strike profiles
 - **Weighted KNN baseline** — z-scored features, cosine surface similarity, exponential recency decay
 - **Forecasts** — next-snapshot ΔGEX, total GEX, regime, gamma flip, spot bias, confidence interval
@@ -15,6 +15,7 @@ Standalone read-only analytics and prediction app for gamma exposure (GEX) data 
 - **FastAPI** — `/forecast`, `/history`, `/similar`, `/backtest`, `/strikes`, `/llm/*`
 - **Gradient boosting overlay** — optional sklearn GBM blend with KNN (`scripts/train_model.py`)
 - **Online learning (River)** — incremental ΔGEX model from [online-ml/river](https://github.com/online-ml/river); learns each new snapshot in the forecast poller
+- **Option price learning** — pulls ATM quotes from [Unusual Whales API](https://api.unusualwhales.com), joins GEX DB context, River-learns Δmid for calls/puts
 - **Multi-horizon forecasts** — h1/h3/h6 snapshot horizons on `/forecast`
 - **Prediction reconciliation** — resolves `llm_predictions` against next snapshot
 - **LLM cache** — avoids re-calling OpenAI on dashboard refresh
@@ -55,6 +56,7 @@ python scripts/explore_db.py
 | Analytics | `./scripts/start_dashboard.sh` |
 | LLM Agent | `./scripts/start_agent.sh` |
 | Forecast poller | `python jobs/forecast_poll.py` |
+| Option learn poller | `python jobs/option_learn_poll.py` |
 
 Health check path: `/health` (or `/`)
 
@@ -88,6 +90,40 @@ Endpoints:
 | GET | `/llm/prompts` | Suggested agent starter questions |
 | GET | `/llm/eval/{ticker}` | Grounding evaluation probes |
 | POST | `/llm/feedback/{ticker}` | Thumbs up/down agent feedback |
+| GET | `/options/status` | UW + option learning config |
+| POST | `/options/ingest/{ticker}` | Pull ATM quotes from UW into Postgres |
+| POST | `/options/learn/{ticker}` | Train/increment River option Δmid model |
+| GET | `/options/forecast/{ticker}` | Predict next-interval option mid move |
+| POST | `/options/cycle/{ticker}` | Ingest → learn → predict in one call |
+
+### Option price learning (DB + Unusual Whales)
+
+Requires `DATABASE_URL` (GEX snapshots) and `UW_API_KEY` ([Unusual Whales API](https://api.unusualwhales.com)).
+
+Each cycle:
+1. Reads latest GEX snapshot from Postgres (spot, total GEX, gamma flip, flow, strike GEX)
+2. Fetches ATM call/put contracts from UW for the nearest expiry in `expiration_json`
+3. Stores quotes in `option_quotes` with GEX context
+4. River online model learns **Δmid** (next-interval change in option mid price)
+5. Serves forecasts on `GET /options/forecast/{ticker}`
+
+```bash
+# One-shot full cycle
+curl -X POST http://localhost:8000/options/cycle/SPX
+
+# Or run dedicated poller (Procfile: option_worker)
+python jobs/option_learn_poll.py
+```
+
+When `OPTION_LEARN_ON_POLL=1` (default), the forecast worker also runs an option cycle on each new snapshot.
+
+| Env | Default | Description |
+|-----|---------|-------------|
+| `UW_API_KEY` | — | Bearer token for Unusual Whales |
+| `UW_TICKER_MAP` | `SPX:SPX,SPY:SPY,NDX:NDX` | Map GEX ticker → UW ticker |
+| `OPTION_LEARN_ENABLED` | `1` | Enable River option price learner |
+| `OPTION_LEARN_ON_POLL` | `1` | Run option cycle in forecast poller |
+| `OPTION_MIN_UPDATES` | `15` | Min training pairs before forecasting |
 
 ### LLM forecast
 
@@ -225,6 +261,10 @@ pytest -q
 | `ONLINE_BLEND_WEIGHT` | `0.15` | Blend weight for online ΔGEX forecast |
 | `ONLINE_AUTO_BOOTSTRAP` | `1` | Warm-start online model from DB on first run |
 | `ONLINE_MIN_UPDATES` | `20` | Min snapshot pairs before online blend activates |
+| `UW_API_KEY` | — | Unusual Whales API bearer token |
+| `OPTION_LEARN_ENABLED` | `1` | River learner for option Δmid |
+| `OPTION_LEARN_ON_POLL` | `1` | Option cycle on each forecast poll |
+| `OPTION_MIN_UPDATES` | `15` | Min quote pairs before option forecast |
 
 ## Database schema
 
