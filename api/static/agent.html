@@ -148,14 +148,16 @@
   <div class="layout">
     <aside>
       <label for="ticker">Ticker</label>
-      <select id="ticker"></select>
+      <select id="ticker">
+        <option value="SPX" selected>SPX</option>
+      </select>
       <label for="mode">Mode</label>
       <select id="mode">
         <option value="fast" selected>Fast (1 API call)</option>
         <option value="deep">Deep (tools + two-pass)</option>
         <option value="quant">Quant only (no LLM)</option>
       </select>
-      <label><input type="checkbox" id="stream" checked /> Stream response</label>
+      <label><input type="checkbox" id="stream" /> Stream response (experimental)</label>
       <label for="apiKey">API key (if required)</label>
       <input id="apiKey" type="password" placeholder="X-API-Key (optional)" />
       <label>Suggested prompts</label>
@@ -192,11 +194,27 @@
     localStorage.setItem('gex_session_id', sessionId);
     const CHAT_TIMEOUT_MS = 120000;
 
-    function formatApiError(detail) {
-      if (!detail) return 'Request failed';
+    function formatApiError(detail, status) {
+      if (!detail) {
+        if (status === 502 || status === 504) return `Gateway timeout (${status}) — try Fast mode without streaming`;
+        if (status === 503) return 'Service unavailable — check DATABASE_URL and OPENAI_API_KEY on Railway';
+        if (status) return `HTTP ${status} — request failed`;
+        return 'Request failed — check network and Railway logs';
+      }
       if (typeof detail === 'string') return detail;
       if (Array.isArray(detail)) return detail.map(x => x.msg || JSON.stringify(x)).join('; ');
       return String(detail);
+    }
+
+    async function parseErrorResponse(r) {
+      const text = await r.text();
+      try {
+        const data = JSON.parse(text);
+        return formatApiError(data.detail, r.status);
+      } catch (_) {
+        if (text && text.length < 300) return text;
+        return formatApiError(null, r.status);
+      }
     }
 
     function setThinking(on) {
@@ -293,6 +311,7 @@
           warnEl.textContent = '';
         }
         (d.supported_tickers || ['SPX']).forEach(t => {
+          if ([...tickerEl.options].some(o => o.value === t)) return;
           const o = document.createElement('option');
           o.value = t; o.textContent = t;
           tickerEl.appendChild(o);
@@ -333,11 +352,14 @@
       const timer = setTimeout(() => controller.abort(), CHAT_TIMEOUT_MS);
 
       const useStream = streamEl.checked && modeEl.value === 'fast';
+      let assistantDiv = null;
 
       try {
+        if (!tickerEl.value) {
+          throw new Error('No ticker selected — wait for health check or pick SPX');
+        }
         if (useStream) {
-          setThinking(true);
-          const assistantDiv = addMessage('assistant', '', null, false);
+          assistantDiv = addMessage('assistant', '', null, false);
           const textNode = assistantDiv.firstChild;
           let full = '';
           const r = await fetch(`/llm/chat/${tickerEl.value}`, {
@@ -353,21 +375,20 @@
             }),
           });
           setThinking(false);
-          if (!r.ok) {
-            const err = await r.json().catch(() => ({}));
-            throw new Error(formatApiError(err.detail));
-          }
+          if (!r.ok) throw new Error(await parseErrorResponse(r));
+          if (!r.body) throw new Error('Streaming not supported by browser — disable Stream and retry');
           const reader = r.body.getReader();
           const decoder = new TextDecoder();
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
             full += decoder.decode(value, { stream: true });
-            textNode.textContent = full;
+            textNode.textContent = full.trimStart();
             messagesEl.scrollTop = messagesEl.scrollHeight;
           }
-          lastReply = full;
-          history.push({ role: 'assistant', content: full });
+          if (!full.trim()) throw new Error('Empty response from server — try again without streaming');
+          lastReply = full.trim();
+          history.push({ role: 'assistant', content: lastReply });
           const metaEl = document.createElement('div');
           metaEl.className = 'msg-meta';
           metaEl.innerHTML = modeEl.value + ' · stream';
@@ -396,8 +417,8 @@
             stream: false,
           }),
         });
+        if (!r.ok) throw new Error(await parseErrorResponse(r));
         const d = await r.json();
-        if (!r.ok) throw new Error(formatApiError(d.detail));
         const reply = d.reply || 'No response.';
         lastReply = reply;
         lastSnapshotTs = d.context_summary?.snapshot_ts || null;
@@ -410,9 +431,10 @@
         }
       } catch (e) {
         const msg = e.name === 'AbortError'
-          ? 'Request timed out after 2 minutes — the server may still be processing. Try again.'
-          : e.message;
+          ? 'Request timed out after 2 minutes — try Fast mode without Deep or streaming.'
+          : (e.message || 'Request failed');
         errorEl.textContent = msg;
+        if (assistantDiv) assistantDiv.remove();
         addMessage('assistant', 'Sorry — ' + msg);
         history.pop();
       } finally {

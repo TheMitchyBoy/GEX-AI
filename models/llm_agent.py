@@ -308,25 +308,37 @@ def stream_agent_reply(
     lookback_days: int | None = None,
     mode: str | None = None,
     session_id: str | None = None,
+    ctx: dict[str, Any] | None = None,
 ) -> Iterator[str]:
     """Stream final answer tokens (fast mode, no tools)."""
-    mode, use_tools, two_pass = _resolve_mode_settings(mode, False, False)
-    if not is_llm_configured():
-        yield quant_only_reply(build_context_bundle(history, lookback_days=lookback_days or config.LOOKBACK_DAYS, rich=True))
-        return
-    ctx = build_agent_context(history, lookback_days=lookback_days, for_chat=True)
-    bundle = ctx.get("bundle") or {}
-    system = _system_prompt(bundle)
-    context_block = _format_context_block(ctx, session_id=session_id, ticker=bundle.get("ticker"))
-    calibration_note = _calibration_guidance(ctx)
-    user_question = messages[-1]["content"] if messages else ""
-    api_messages = [{
-        "role": "user",
-        "content": f"{context_block}\n\n[CALIBRATION]\n{calibration_note}\n\n[USER_QUESTION]\n{user_question}",
-    }]
-    for token in openai_chat_stream(system, api_messages, model=model_for_task("answer")):
-        if token:
-            yield token
+    mode, _, _ = _resolve_mode_settings(mode, False, False)
+    lookback_days = lookback_days if lookback_days is not None else config.LOOKBACK_DAYS
+    try:
+        if mode == "quant" or not is_llm_configured():
+            bundle = (ctx or {}).get("bundle") or build_context_bundle(
+                history, lookback_days=lookback_days, rich=config.LLM_RICH_CONTEXT
+            )
+            agreement = bundle.get("model_agreement")
+            yield quant_only_reply(bundle, agreement=agreement)
+            return
+        if ctx is None:
+            with timed_stage("build_agent_context"):
+                ctx = build_agent_context(history, lookback_days=lookback_days, for_chat=True)
+        bundle = ctx.get("bundle") or {}
+        system = _system_prompt(bundle)
+        context_block = _format_context_block(ctx, session_id=session_id, ticker=bundle.get("ticker"))
+        calibration_note = _calibration_guidance(ctx)
+        user_question = messages[-1]["content"] if messages else ""
+        api_messages = [{
+            "role": "user",
+            "content": f"{context_block}\n\n[CALIBRATION]\n{calibration_note}\n\n[USER_QUESTION]\n{user_question}",
+        }]
+        with timed_stage("stream_answer"):
+            for token in openai_chat_stream(system, api_messages, model=model_for_task("answer")):
+                if token:
+                    yield token
+    except Exception as exc:
+        yield f"\n\nSorry — the agent hit an error: {exc}"
 
 
 def _finalize_session(ticker: str, session_id: str | None, question: str, reply: str, ts: str | None) -> None:

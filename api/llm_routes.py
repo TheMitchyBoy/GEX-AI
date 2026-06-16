@@ -140,31 +140,51 @@ def agent_prompts() -> dict[str, Any]:
 
 
 @router.post("/chat/{ticker}")
-def agent_chat(ticker: str, body: AgentChatRequest) -> dict[str, Any]:
-    require_database_url()
+def agent_chat(ticker: str, body: AgentChatRequest):
     try:
-        history = load_snapshot_history(ticker.upper(), lookback_days=body.lookback_days)
+        require_database_url()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    ticker = ticker.upper().strip()
+    if not ticker:
+        raise HTTPException(status_code=422, detail="Ticker is required")
+
+    try:
+        history = load_snapshot_history(ticker, lookback_days=body.lookback_days)
     except Exception as exc:
         logger.exception("Failed to load history for agent chat")
         raise HTTPException(status_code=503, detail=f"Database error: {exc}") from exc
     if len(history) < config.MIN_KNN_SNAPSHOTS:
         raise HTTPException(
             status_code=422,
-            detail=f"Insufficient data: need at least {config.MIN_KNN_SNAPSHOTS} snapshots",
+            detail=f"Insufficient data: need at least {config.MIN_KNN_SNAPSHOTS} snapshots, got {len(history)}",
         )
     messages = [{"role": m.role, "content": m.content} for m in body.messages]
 
     if body.stream and body.mode != "deep":
+        from models.llm_agent import build_agent_context
+
+        try:
+            ctx = build_agent_context(history, lookback_days=body.lookback_days, for_chat=True)
+        except Exception as exc:
+            logger.exception("Failed to build agent context for stream")
+            raise HTTPException(status_code=503, detail=f"Context build failed: {exc}") from exc
+
         def _gen():
+            yield " "
             for chunk in stream_agent_reply(
-                history, messages,
+                history,
+                messages,
                 lookback_days=body.lookback_days,
                 mode=body.mode,
                 session_id=body.session_id,
+                ctx=ctx,
             ):
-                yield chunk
+                if chunk:
+                    yield chunk
 
-        return StreamingResponse(_gen(), media_type="text/plain")
+        return StreamingResponse(_gen(), media_type="text/plain; charset=utf-8")
 
     try:
         result = chat_with_agent(
@@ -183,7 +203,7 @@ def agent_chat(ticker: str, body: AgentChatRequest) -> dict[str, Any]:
     if result.get("error") and not result.get("reply"):
         raise HTTPException(status_code=503, detail=result["error"])
     return {
-        "ticker": ticker.upper(),
+        "ticker": ticker,
         "reply": result.get("reply"),
         "model": result.get("model"),
         "mode": result.get("mode"),
