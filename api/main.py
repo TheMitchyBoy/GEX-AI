@@ -13,9 +13,12 @@ from db.connection import get_connection, require_database_url
 from db.loader import load_snapshot_history
 from db.queries import fetch_intraday_timeline, fetch_latest_snapshot, fetch_snapshot_strikes, get_latest_ts, get_row_counts
 from models.backtest import run_backtest
+from models.llm_client import is_llm_configured
 from models.predict import predict_next_snapshot, similar_setups
+from api.llm_routes import router as llm_router
 
-app = FastAPI(title="GEX Prediction API", version="1.0.0")
+app = FastAPI(title="GEX Prediction API", version="1.1.0")
+app.include_router(llm_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -26,7 +29,11 @@ app.add_middleware(
 
 @app.get("/health")
 def health() -> dict[str, Any]:
-    payload: dict[str, Any] = {"status": "ok", "database_configured": bool(config.DATABASE_URL)}
+    payload: dict[str, Any] = {
+        "status": "ok",
+        "database_configured": bool(config.DATABASE_URL),
+        "llm_configured": is_llm_configured(),
+    }
     if config.DATABASE_URL:
         try:
             with get_connection() as conn:

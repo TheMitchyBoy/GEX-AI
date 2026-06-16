@@ -11,7 +11,7 @@ Standalone read-only analytics and prediction app for gamma exposure (GEX) data 
 - **Similar setups** — nearest historical analogs
 - **Walk-forward backtest** — MAE on ΔGEX, regime accuracy, spot bias hit rate, interval coverage
 - **Streamlit dashboard** — live regime, forecast card, intraday charts, strike heatmap
-- **FastAPI** — `/forecast`, `/history`, `/similar`, `/backtest`, `/strikes`
+- **FastAPI** — `/forecast`, `/history`, `/similar`, `/backtest`, `/strikes`, `/llm/*`
 - **Forecast poller** — optional job to detect new `ts` and write to `llm_predictions`
 
 ## Quick start
@@ -46,6 +46,26 @@ Endpoints:
 | GET | `/similar/{ticker}` | Historical analogs |
 | GET | `/strikes/{ticker}?ts=` | Strike profile |
 | GET | `/backtest/{ticker}` | Walk-forward metrics |
+| GET | `/llm/status` | LLM configuration status |
+| GET | `/llm/forecast/{ticker}` | LLM-enhanced next-snapshot forecast |
+| POST | `/llm/forecast/{ticker}` | LLM forecast with optional extra instructions |
+| GET | `/llm/predictions/{ticker}` | Logged predictions from `llm_predictions` |
+
+### LLM forecast
+
+Requires `OPENAI_API_KEY`. Builds a context bundle from Postgres (current snapshot, strikes, term structure, intraday timeline, KNN forecast, similar setups) and returns structured JSON:
+
+```bash
+curl http://localhost:8000/llm/forecast/SPX
+
+curl -X POST http://localhost:8000/llm/forecast/SPX \
+  -H 'Content-Type: application/json' \
+  -d '{"extra_instructions": "Focus on 0DTE pin risk near spot."}'
+```
+
+Without an API key, `/llm/forecast` falls back to the KNN baseline with rule-based narrative.
+
+Set `WRITE_PREDICTIONS=1` or pass `?persist=true` to log forecasts into `llm_predictions`.
 
 ### Run dashboard
 
@@ -82,6 +102,11 @@ pytest -q
 | `FORECAST_POLL_SEC` | `60` | Dashboard/poller refresh interval |
 | `PROCESSOR_HEALTH_URL` | — | Optional upstream `GET /health/live` |
 | `WRITE_PREDICTIONS` | `0` | Insert forecasts into `llm_predictions` |
+| `OPENAI_API_KEY` | — | OpenAI API key for LLM forecasts |
+| `LLM_MODEL` | `gpt-4o-mini` | OpenAI chat model |
+| `LLM_MAX_TOKENS` | `1200` | Max tokens per LLM response |
+| `LLM_TEMPERATURE` | `0.35` | LLM sampling temperature |
+| `LLM_PREDICTION_SOURCE` | `gex-ai-llm` | `source` column when logging LLM forecasts |
 
 ## Database schema
 

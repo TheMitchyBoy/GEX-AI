@@ -150,8 +150,39 @@ def insert_prediction(
         """
         INSERT INTO llm_predictions (ticker, source, snapshot_ts, market_date, created_at, payload_json)
         VALUES (%s, %s, %s, %s, %s, %s::jsonb)
-        ON CONFLICT DO NOTHING
         """,
         (ticker, source, snapshot_ts, market_date, created_at, json.dumps(payload)),
     )
     conn.commit()
+
+
+def fetch_llm_predictions(
+    conn: psycopg.Connection,
+    ticker: str,
+    *,
+    limit: int = 50,
+    source: str | None = None,
+    unresolved_only: bool = False,
+) -> list[dict[str, Any]]:
+    clauses = ["ticker = %s"]
+    params: list[Any] = [ticker]
+    if source:
+        clauses.append("source = %s")
+        params.append(source)
+    if unresolved_only:
+        clauses.append("resolved_at IS NULL")
+    where = " AND ".join(clauses)
+    params.append(limit)
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            f"""
+            SELECT id, ticker, source, snapshot_ts, market_date, created_at,
+                   resolved_at, payload_json, actual_json, outcome_json
+            FROM llm_predictions
+            WHERE {where}
+            ORDER BY created_at DESC
+            LIMIT %s
+            """,
+            params,
+        )
+        return list(cur.fetchall())

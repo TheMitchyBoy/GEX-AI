@@ -16,6 +16,7 @@ from db.features import enrich_snapshot_metrics, safe_float
 from db.loader import load_snapshot_history
 from db.queries import fetch_intraday_timeline, fetch_snapshot_strikes, get_latest_ts
 from models.backtest import run_backtest
+from models.llm_predict import generate_llm_forecast
 from models.predict import predict_next_snapshot, similar_setups
 
 st.set_page_config(page_title="GEX Analytics", layout="wide", page_icon="📊")
@@ -175,7 +176,7 @@ def main() -> None:
             ]
         )
 
-    tab1, tab2, tab3, tab4 = st.tabs(["Intraday", "Strike Heatmap", "Similar Setups", "Backtest"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Intraday", "Strike Heatmap", "Similar Setups", "Backtest", "LLM Insights"])
 
     with tab1:
         if not timeline.empty:
@@ -210,6 +211,27 @@ def main() -> None:
                 st.dataframe(pd.DataFrame(report.rows).tail(20), use_container_width=True, hide_index=True)
         else:
             st.info("Need more snapshots for backtest.")
+
+    with tab5:
+        st.subheader("LLM Market Analysis")
+        if not config.OPENAI_API_KEY:
+            st.info("Set `OPENAI_API_KEY` in `.env` to enable LLM forecasts. Showing KNN fallback.")
+        if len(history) >= config.MIN_KNN_SNAPSHOTS:
+            llm_result = generate_llm_forecast(history, lookback_days=lookback, persist=False)
+            st.write(f"**Source:** {llm_result.get('prediction_source')} · **Confidence:** {llm_result.get('confidence', 0):.0%}")
+            st.write(f"**Regime:** {llm_result.get('predicted_regime')} · **Spot bias:** {llm_result.get('spot_bias')}")
+            if llm_result.get("reasoning"):
+                st.markdown(llm_result["reasoning"])
+            if llm_result.get("predictions"):
+                st.markdown("**Predictions**")
+                for item in llm_result["predictions"]:
+                    st.markdown(f"- {item}")
+            if llm_result.get("scenarios"):
+                st.dataframe(pd.DataFrame(llm_result["scenarios"]), use_container_width=True, hide_index=True)
+            with st.expander("Full LLM response"):
+                st.json(llm_result)
+        else:
+            st.info("Need more snapshots for LLM analysis.")
 
     if forecast and forecast.get("last_move_attribution"):
         with st.expander("Structural attribution (last move)"):

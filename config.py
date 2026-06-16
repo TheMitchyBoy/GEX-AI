@@ -18,6 +18,12 @@ WRITE_PREDICTIONS = os.environ.get("WRITE_PREDICTIONS", "0") in ("1", "true", "T
 API_HOST = os.environ.get("API_HOST", "0.0.0.0")
 API_PORT = int(os.environ.get("API_PORT", "8000"))
 PREDICTION_SOURCE = os.environ.get("PREDICTION_SOURCE", "gex-ai-dashboard")
+LLM_PREDICTION_SOURCE = os.environ.get("LLM_PREDICTION_SOURCE", "gex-ai-llm")
+
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+LLM_MODEL = os.environ.get("LLM_MODEL", os.environ.get("GEX_AGENT_MODEL", "gpt-4o-mini"))
+LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", os.environ.get("GEX_AI_MAX_TOKENS", "1200")))
+LLM_TEMPERATURE = float(os.environ.get("LLM_TEMPERATURE", os.environ.get("GEX_AI_TEMPERATURE", "0.35")))
 
 MIN_KNN_SNAPSHOTS = 4
 RECENCY_DECAY = 0.92
