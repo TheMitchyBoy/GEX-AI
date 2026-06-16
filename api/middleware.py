@@ -32,6 +32,8 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         # Public agent UI calls these without API key
         if request.url.path.startswith("/llm/chat") or request.url.path in ("/llm/prompts", "/llm/status"):
             return await call_next(request)
+        if request.url.path.startswith("/llm/feedback"):
+            return await call_next(request)
 
         if config.API_KEY:
             key = request.headers.get("X-API-Key") or request.query_params.get("api_key")

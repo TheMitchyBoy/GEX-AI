@@ -73,6 +73,7 @@ def test_chat_two_pass_mock():
                         [{"role": "user", "content": "What is the regime?"}],
                         two_pass=True,
                         use_tools=False,
+                        mode="deep",
                     )
     assert result["reply"] is not None
     assert result["two_pass"] is True
@@ -94,6 +95,7 @@ def test_chat_with_tools_mock():
                         [{"role": "user", "content": "Give me the forecast"}],
                         two_pass=False,
                         use_tools=True,
+                        mode="deep",
                     )
     assert "gamma" in (result["reply"] or "").lower()
     assert "get_forecast" in result["tools_used"]

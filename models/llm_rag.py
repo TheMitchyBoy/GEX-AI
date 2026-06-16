@@ -76,3 +76,73 @@ def retrieve_similar_sessions(
 
     scored.sort(key=lambda x: x[0])
     return [s for _, s in scored[:top_n]]
+
+
+def retrieve_regime_matched_sessions(
+    history: list[dict[str, Any]],
+    *,
+    top_n: int = 3,
+    flip_window_pct: float = 0.005,
+) -> list[dict[str, Any]]:
+    """Sessions where regime AND near-flip distance match today."""
+    if len(history) < 5:
+        return []
+    current = enrich_snapshot_metrics(history[-1].copy())
+    cur_regime = str(current.get("regime") or "").upper()
+    cur_flip_dist = abs(safe_float(current.get("flip_distance_pct")))
+
+    by_date: dict[str, list[dict[str, Any]]] = {}
+    for snap in history:
+        md = snap.get("market_date") or snap.get("ts", "")[:10]
+        by_date.setdefault(md, []).append(snap)
+
+    current_date = history[-1].get("market_date") or history[-1]["ts"][:10]
+    matches: list[dict[str, Any]] = []
+    for md, snaps in by_date.items():
+        if md == current_date or len(snaps) < 3:
+            continue
+        summary = _session_summary(snaps)
+        regime = str(summary.get("end_regime") or "").upper()
+        flip_dist = abs(safe_float(summary.get("avg_flip_distance_pct")))
+        if ("LONG" in cur_regime) != ("LONG" in regime):
+            continue
+        if abs(flip_dist - cur_flip_dist) > flip_window_pct:
+            continue
+        matches.append({**summary, "match_type": "regime_and_flip_proximity"})
+    matches.sort(key=lambda s: abs(s.get("spot_move_pct", 0)))
+    return matches[:top_n]
+
+
+def retrieve_outcome_matched_sessions(
+    history: list[dict[str, Any]],
+    knn_delta: float | None,
+    *,
+    top_n: int = 3,
+) -> list[dict[str, Any]]:
+    """Past sessions whose next-day move sign matched today's KNN ΔGEX sign."""
+    if knn_delta is None or len(history) < 10:
+        return []
+    target_sign = 1 if knn_delta > 0 else (-1 if knn_delta < 0 else 0)
+    if target_sign == 0:
+        return []
+
+    by_date: dict[str, list[dict[str, Any]]] = {}
+    for snap in history:
+        md = snap.get("market_date") or snap.get("ts", "")[:10]
+        by_date.setdefault(md, []).append(snap)
+
+    dates = sorted(by_date.keys())
+    current_date = history[-1].get("market_date") or history[-1]["ts"][:10]
+    matches: list[dict[str, Any]] = []
+    for i, md in enumerate(dates[:-1]):
+        if md == current_date:
+            continue
+        snaps = by_date[md]
+        if len(snaps) < 3:
+            continue
+        summary = _session_summary(snaps)
+        move_sign = 1 if summary.get("spot_move_pct", 0) > 0 else (-1 if summary.get("spot_move_pct", 0) < 0 else 0)
+        if move_sign == target_sign:
+            matches.append({**summary, "match_type": "outcome_sign_aligned_with_knn"})
+    matches.sort(key=lambda s: -abs(s.get("spot_move_pct", 0)))
+    return matches[:top_n]

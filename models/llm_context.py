@@ -13,7 +13,11 @@ from db.features import enrich_snapshot_metrics, safe_float, select_atm_strike_s
 from db.prediction_history import fetch_recent_resolved_outcomes
 from db.queries import fetch_calibration_stats
 from models.gboost import predict_gboost_delta
-from models.llm_rag import retrieve_similar_sessions
+from models.llm_rag import retrieve_outcome_matched_sessions, retrieve_regime_matched_sessions, retrieve_similar_sessions
+from models.online_learn import predict_online_delta
+from models.ensemble import blend_delta
+from models.agreement import compute_agreement
+from models.context_compress import compress_bundle
 from models.predict import attribute_last_move, predict_next_snapshot, similar_setups
 
 
@@ -129,20 +133,42 @@ def build_context_bundle(
 
     if rich:
         gboost = predict_gboost_delta(history, str(ticker))
+        online = predict_online_delta(history, str(ticker)) if config.ONLINE_LEARNING_ENABLED else None
+        knn_delta = knn.get("predicted_delta_gex") if knn else None
+        ensemble = blend_delta(
+            knn_delta=knn_delta,
+            gboost_delta=gboost,
+            online_delta=online,
+            ticker=str(ticker),
+        ) if config.ENSEMBLE_ENABLED else {}
         bundle["quant_synthesis"] = {
-            "knn_delta_gex_bn": knn.get("predicted_delta_gex") if knn else None,
+            "knn_delta_gex_bn": knn_delta,
             "knn_confidence": knn.get("confidence") if knn else None,
             "knn_regime_flip_probability": knn.get("regime_flip_probability") if knn else None,
             "gboost_delta_gex_bn": gboost,
+            "online_delta_gex_bn": online,
+            "ensemble_delta_gex_bn": ensemble.get("ensemble_delta_gex"),
+            "ensemble_weights": ensemble.get("weights_used"),
             "blend_note": "Synthesize quant outputs; cite specific strike/flow facts if disagreeing with KNN.",
         }
-        bundle["atm_strike_band"] = _atm_strike_band(strike, spot)
-        bundle["cumulative_gex_near_spot"] = _cumulative_near_spot(cumulative, spot)
+        bundle["model_agreement"] = compute_agreement(
+            knn=knn,
+            gboost_delta=gboost,
+            online_delta=online,
+            ensemble=ensemble,
+        )
+        bundle["atm_strike_band"] = _atm_strike_band(strike, spot, max_strikes=8)
+        bundle["cumulative_gex_near_spot"] = _cumulative_near_spot(cumulative, spot, n=8)
         bundle["last_move_attribution"] = attribute_last_move(enriched)
         bundle["similar_sessions"] = retrieve_similar_sessions(history, top_n=3)
+        bundle["regime_matched_sessions"] = retrieve_regime_matched_sessions(history, top_n=2)
+        bundle["outcome_matched_sessions"] = retrieve_outcome_matched_sessions(history, knn_delta, top_n=2)
         bundle["forecast_track_record"] = _forecast_track_record(str(ticker))
         if isinstance(bundle["gex_by_expiration"], dict) and slim:
             pass  # keep full expirations in rich mode
+
+    if config.LLM_CONTEXT_COMPRESS:
+        bundle = compress_bundle(bundle)
 
     return bundle
 

@@ -304,7 +304,7 @@ def predict_next_snapshot(
         predicted_regime=predicted_regime,
     )
 
-    return {
+    result = {
         "predicted_total_gex": preds["total_gex"],
         "predicted_delta_gex": preds["delta_gex"],
         "predicted_regime": predicted_regime,
@@ -338,6 +338,19 @@ def predict_next_snapshot(
         "blend_weight_gboost": config.GBOOST_BLEND_WEIGHT if gboost_delta is not None else 0.0,
         "blend_weight_online": config.ONLINE_BLEND_WEIGHT if online_delta is not None else 0.0,
     }
+    if config.ENSEMBLE_ENABLED:
+        try:
+            from models.ensemble import blend_delta
+
+            result["ensemble"] = blend_delta(
+                knn_delta=knn_delta,
+                gboost_delta=gboost_delta,
+                online_delta=online_delta,
+                ticker=current.get("ticker", config.DEFAULT_TICKER),
+            )
+        except Exception:
+            pass
+    return result
 
 
 def similar_setups(

@@ -6,6 +6,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 import config
@@ -14,7 +15,7 @@ from db.loader import load_snapshot_history
 from db.queries import fetch_llm_predictions
 from models.llm_client import is_llm_configured
 from models.llm_predict import generate_llm_forecast
-from models.llm_agent import SUGGESTED_PROMPTS, chat_with_agent
+from models.llm_agent import SUGGESTED_PROMPTS, chat_with_agent, stream_agent_reply
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,17 @@ class AgentChatRequest(BaseModel):
     refresh_context: bool = True
     use_tools: bool | None = None
     two_pass: bool | None = None
+    mode: str = Field(default="fast", pattern="^(fast|deep|quant)$")
+    session_id: str | None = Field(default=None, max_length=64)
+    stream: bool = False
+
+
+class FeedbackRequest(BaseModel):
+    session_id: str = Field(min_length=1, max_length=64)
+    rating: int = Field(ge=-1, le=1)
+    message: str | None = Field(default=None, max_length=4000)
+    reply: str | None = Field(default=None, max_length=8000)
+    snapshot_ts: str | None = None
 
 
 class LLMForecastRequest(BaseModel):
@@ -55,6 +67,10 @@ def llm_status() -> dict[str, Any]:
         "rich_context": config.LLM_RICH_CONTEXT,
         "max_tool_rounds": config.LLM_MAX_TOOL_ROUNDS,
         "agent_fast_mode": config.LLM_AGENT_FAST,
+        "structured_output": config.LLM_STRUCTURED_OUTPUT,
+        "context_compress": config.LLM_CONTEXT_COMPRESS,
+        "ensemble_enabled": config.ENSEMBLE_ENABLED,
+        "modes": ["fast", "deep", "quant"],
     }
 
 
@@ -137,6 +153,19 @@ def agent_chat(ticker: str, body: AgentChatRequest) -> dict[str, Any]:
             detail=f"Insufficient data: need at least {config.MIN_KNN_SNAPSHOTS} snapshots",
         )
     messages = [{"role": m.role, "content": m.content} for m in body.messages]
+
+    if body.stream and body.mode != "deep":
+        def _gen():
+            for chunk in stream_agent_reply(
+                history, messages,
+                lookback_days=body.lookback_days,
+                mode=body.mode,
+                session_id=body.session_id,
+            ):
+                yield chunk
+
+        return StreamingResponse(_gen(), media_type="text/plain")
+
     try:
         result = chat_with_agent(
             history,
@@ -145,6 +174,8 @@ def agent_chat(ticker: str, body: AgentChatRequest) -> dict[str, Any]:
             refresh_context=body.refresh_context,
             use_tools=body.use_tools,
             two_pass=body.two_pass,
+            mode=body.mode,
+            session_id=body.session_id,
         )
     except Exception as exc:
         logger.exception("Agent chat failed for %s", ticker)
@@ -155,6 +186,9 @@ def agent_chat(ticker: str, body: AgentChatRequest) -> dict[str, Any]:
         "ticker": ticker.upper(),
         "reply": result.get("reply"),
         "model": result.get("model"),
+        "mode": result.get("mode"),
+        "agreement": result.get("agreement"),
+        "latency": result.get("latency"),
         "two_pass": result.get("two_pass"),
         "tools_used": result.get("tools_used") or [],
         "intelligence": result.get("intelligence"),
@@ -187,3 +221,18 @@ def agent_eval(
         return evaluate_agent_grounding(history, lookback_days=lookback_days)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/feedback/{ticker}")
+def agent_feedback(ticker: str, body: FeedbackRequest) -> dict[str, Any]:
+    from db.agent_store import save_feedback
+
+    row = save_feedback(
+        ticker=ticker.upper(),
+        session_id=body.session_id,
+        rating=body.rating,
+        message=body.message,
+        reply=body.reply,
+        snapshot_ts=body.snapshot_ts,
+    )
+    return {"ok": True, "feedback": row}

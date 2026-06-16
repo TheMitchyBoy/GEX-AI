@@ -84,6 +84,7 @@ Endpoints:
 | POST | `/llm/chat/{ticker}` | Conversational GEX agent (multi-turn) |
 | GET | `/llm/prompts` | Suggested agent starter questions |
 | GET | `/llm/eval/{ticker}` | Grounding evaluation probes |
+| POST | `/llm/feedback/{ticker}` | Thumbs up/down agent feedback |
 
 ### LLM forecast
 
@@ -140,15 +141,20 @@ curl -X POST http://localhost:8000/llm/chat/SPX \
 
 ### AI intelligence features
 
-The agent uses a multi-layer pipeline (all toggleable via env vars):
+The agent supports three modes: **fast** (default, 1 API call), **deep** (tools + two-pass), **quant** (no LLM).
 
 | Feature | Env | Description |
 |---------|-----|-------------|
 | Rich context | `LLM_RICH_CONTEXT=1` | ATM strike band, cumulative GEX, quant synthesis, session analogs, forecast track record |
-| Two-pass reasoning | `LLM_TWO_PASS=1` | Structured fact extraction pass before final answer |
-| Tool calling | `LLM_USE_TOOLS=1` | OpenAI function calls: forecast, similar setups, strikes, backtest, KNN vs LLM |
-| Session RAG | (always in rich mode) | Similar trading days grouped by `market_date` |
-| Calibration feedback | (always in rich mode) | Resolved `llm_predictions` outcomes injected into context |
+| Context compression | `LLM_CONTEXT_COMPRESS=1` | Trim strikes/timeline before sending to OpenAI |
+| Ensemble forecast | `ENSEMBLE_ENABLED=1` | Blend KNN + GBoost + River online learner |
+| Model agreement | (auto) | Agreement score injected when quant models diverge |
+| Event playbooks | (auto) | 0DTE / FOMC / OPEX / near-flip prompt snippets |
+| Multi-model routing | `LLM_MODEL_FAST` | Facts/tools use mini, final answer uses `LLM_MODEL` |
+| Streaming chat | `stream: true` in POST body | Token-by-token response (fast mode) |
+| Session memory | `AGENT_MEMORY_ENABLED=1` | Prior Q&A in session injected into context |
+| Feedback loop | `POST /llm/feedback` | Thumbs up/down stored for calibration |
+| Auto GBoost retrain | `AUTO_TRAIN_GBOOST=1` | `daily_insights` job retrains GBoost + ensemble weights |
 
 Evaluate grounding probes:
 

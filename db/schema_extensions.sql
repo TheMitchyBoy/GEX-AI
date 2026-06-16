@@ -30,6 +30,20 @@ CREATE TABLE IF NOT EXISTS daily_insights (
 CREATE INDEX IF NOT EXISTS idx_daily_insights_ticker_date
     ON daily_insights (ticker, market_date DESC);
 
+CREATE TABLE IF NOT EXISTS agent_feedback (
+    id SERIAL PRIMARY KEY,
+    ticker TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    rating INTEGER NOT NULL,
+    message TEXT,
+    reply_preview TEXT,
+    snapshot_ts TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_feedback_ticker
+    ON agent_feedback (ticker, created_at DESC);
+
 -- Optional: NOTIFY on new snapshots (processor can also emit manually)
 CREATE OR REPLACE FUNCTION notify_gex_snapshot_insert() RETURNS trigger AS $$
 BEGIN

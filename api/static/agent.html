@@ -96,13 +96,9 @@
     .msg.user { align-self: flex-end; background: var(--user); }
     .msg.assistant { align-self: flex-start; background: var(--bot); border: 1px solid var(--border); }
     .msg-meta { font-size: 0.72rem; color: var(--muted); margin-top: 0.35rem; }
-    .msg-meta .tag {
-      display: inline-block;
-      background: var(--panel);
-      padding: 0.1rem 0.4rem;
-      border-radius: 4px;
-      margin-right: 0.35rem;
-    }
+    .msg-meta .tag { display: inline-block; background: var(--panel); padding: 0.1rem 0.4rem; border-radius: 4px; margin-right: 0.35rem; }
+    .feedback { margin-top: 0.4rem; }
+    .feedback button { background: transparent; border: 1px solid var(--border); color: var(--muted); border-radius: 6px; padding: 0.15rem 0.5rem; cursor: pointer; margin-right: 0.35rem; font-size: 0.75rem; }
     .composer {
       border-top: 1px solid var(--border);
       padding: 1rem 1.25rem;
@@ -153,6 +149,13 @@
     <aside>
       <label for="ticker">Ticker</label>
       <select id="ticker"></select>
+      <label for="mode">Mode</label>
+      <select id="mode">
+        <option value="fast" selected>Fast (1 API call)</option>
+        <option value="deep">Deep (tools + two-pass)</option>
+        <option value="quant">Quant only (no LLM)</option>
+      </select>
+      <label><input type="checkbox" id="stream" checked /> Stream response</label>
       <label for="apiKey">API key (if required)</label>
       <input id="apiKey" type="password" placeholder="X-API-Key (optional)" />
       <label>Suggested prompts</label>
@@ -178,9 +181,15 @@
     const tickerEl = document.getElementById('ticker');
     const apiKeyEl = document.getElementById('apiKey');
     const promptsEl = document.getElementById('prompts');
+    const modeEl = document.getElementById('mode');
+    const streamEl = document.getElementById('stream');
 
     let history = [];
     let thinkingEl = null;
+    let lastReply = '';
+    let lastSnapshotTs = null;
+    const sessionId = localStorage.getItem('gex_session_id') || ('s-' + Math.random().toString(36).slice(2, 10));
+    localStorage.setItem('gex_session_id', sessionId);
     const CHAT_TIMEOUT_MS = 120000;
 
     function formatApiError(detail) {
@@ -210,18 +219,49 @@
       return h;
     }
 
-    function addMessage(role, content, meta) {
+    function addMessage(role, content, meta, feedback) {
       const div = document.createElement('div');
       div.className = 'msg ' + role;
-      div.textContent = content;
+      const textNode = document.createTextNode(content);
+      div.appendChild(textNode);
       if (meta && role === 'assistant') {
         const metaEl = document.createElement('div');
         metaEl.className = 'msg-meta';
         metaEl.innerHTML = meta;
         div.appendChild(metaEl);
       }
+      if (feedback && role === 'assistant') {
+        const fb = document.createElement('div');
+        fb.className = 'feedback';
+        const up = document.createElement('button');
+        up.textContent = '👍';
+        up.onclick = () => sendFeedback(1);
+        const down = document.createElement('button');
+        down.textContent = '👎';
+        down.onclick = () => sendFeedback(-1);
+        fb.appendChild(up);
+        fb.appendChild(down);
+        div.appendChild(fb);
+      }
       messagesEl.appendChild(div);
       messagesEl.scrollTop = messagesEl.scrollHeight;
+      return div;
+    }
+
+    async function sendFeedback(rating) {
+      try {
+        await fetch(`/llm/feedback/${tickerEl.value}`, {
+          method: 'POST',
+          headers: headers(),
+          body: JSON.stringify({
+            session_id: sessionId,
+            rating,
+            message: history.filter(m => m.role === 'user').slice(-1)[0]?.content,
+            reply: lastReply,
+            snapshot_ts: lastSnapshotTs,
+          }),
+        });
+      } catch (_) {}
     }
 
     function formatMeta(d) {
@@ -231,7 +271,8 @@
       if (d.tools_used && d.tools_used.length) {
         tags.push('<span class="tag">tools: ' + d.tools_used.join(', ') + '</span>');
       }
-      if (d.intelligence?.rich_context) tags.push('<span class="tag">rich context</span>');
+      if (d.mode) tags.push('<span class="tag">' + d.mode + '</span>');
+      if (d.agreement?.score != null) tags.push('<span class="tag">agreement ' + d.agreement.score + '</span>');
       const parts = [d.model, ...tags].filter(Boolean);
       return parts.length ? parts.join(' · ') : '';
     }
@@ -291,7 +332,58 @@
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), CHAT_TIMEOUT_MS);
 
+      const useStream = streamEl.checked && modeEl.value === 'fast';
+
       try {
+        if (useStream) {
+          setThinking(true);
+          const assistantDiv = addMessage('assistant', '', null, false);
+          const textNode = assistantDiv.firstChild;
+          let full = '';
+          const r = await fetch(`/llm/chat/${tickerEl.value}`, {
+            method: 'POST',
+            headers: headers(),
+            signal: controller.signal,
+            body: JSON.stringify({
+              messages: history,
+              refresh_context: history.length <= 2,
+              mode: modeEl.value,
+              session_id: sessionId,
+              stream: true,
+            }),
+          });
+          setThinking(false);
+          if (!r.ok) {
+            const err = await r.json().catch(() => ({}));
+            throw new Error(formatApiError(err.detail));
+          }
+          const reader = r.body.getReader();
+          const decoder = new TextDecoder();
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            full += decoder.decode(value, { stream: true });
+            textNode.textContent = full;
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+          }
+          lastReply = full;
+          history.push({ role: 'assistant', content: full });
+          const metaEl = document.createElement('div');
+          metaEl.className = 'msg-meta';
+          metaEl.innerHTML = modeEl.value + ' · stream';
+          assistantDiv.appendChild(metaEl);
+          const fb = document.createElement('div');
+          fb.className = 'feedback';
+          const up = document.createElement('button');
+          up.textContent = '👍';
+          up.onclick = () => sendFeedback(1);
+          const down = document.createElement('button');
+          down.textContent = '👎';
+          down.onclick = () => sendFeedback(-1);
+          fb.appendChild(up);
+          fb.appendChild(down);
+          assistantDiv.appendChild(fb);
+        } else {
         const r = await fetch(`/llm/chat/${tickerEl.value}`, {
           method: 'POST',
           headers: headers(),
@@ -299,21 +391,22 @@
           body: JSON.stringify({
             messages: history,
             refresh_context: history.length <= 2,
+            mode: modeEl.value,
+            session_id: sessionId,
+            stream: false,
           }),
         });
-        let d;
-        try {
-          d = await r.json();
-        } catch (_) {
-          throw new Error(r.status === 504 ? 'Request timed out — try a shorter question' : 'Invalid server response');
-        }
+        const d = await r.json();
         if (!r.ok) throw new Error(formatApiError(d.detail));
         const reply = d.reply || 'No response.';
+        lastReply = reply;
+        lastSnapshotTs = d.context_summary?.snapshot_ts || null;
         history.push({ role: 'assistant', content: reply });
-        addMessage('assistant', reply, formatMeta(d));
+        addMessage('assistant', reply, formatMeta(d), true);
         if (d.context_summary?.snapshot_ts) {
           const base = statusEl.textContent.split(' · ctx ')[0];
           statusEl.textContent = `${base} · ctx ${d.context_summary.snapshot_ts}`;
+        }
         }
       } catch (e) {
         const msg = e.name === 'AbortError'

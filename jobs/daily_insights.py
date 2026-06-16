@@ -12,6 +12,8 @@ from db.connection import get_connection, require_database_url
 from db.loader import load_snapshot_history
 from db.queries import ensure_extensions, upsert_daily_insight
 from models.backtest import run_backtest
+from models.ensemble import learn_weights_from_backtest
+from models.gboost import train_gboost
 from models.llm_client import is_llm_configured, openai_chat_json
 
 logging.basicConfig(level=logging.INFO)
@@ -39,6 +41,15 @@ def generate_daily_insight(ticker: str, market_date: str) -> dict:
             summary["llm_insights"] = parsed
         elif err:
             summary["llm_error"] = err
+    if config.AUTO_TRAIN_GBOOST and len(history) >= 20:
+        try:
+            gboost = train_gboost(history, ticker)
+            if gboost:
+                summary["gboost_retrained"] = {"n_train": gboost["n_train"], "cv_mae": gboost["cv_mae"]}
+            weights = learn_weights_from_backtest(backtest.to_dict(), ticker)
+            summary["ensemble_weights"] = weights
+        except Exception:
+            logger.exception("Auto-train failed for %s", ticker)
     return summary
 
 
