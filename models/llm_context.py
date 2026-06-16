@@ -22,7 +22,8 @@ def build_context_bundle(
     history: list[dict[str, Any]],
     *,
     lookback_days: int,
-    intraday_points: int = 24,
+    intraday_points: int = 12,
+    slim: bool = True,
 ) -> dict[str, Any]:
     if not history:
         return {}
@@ -32,9 +33,9 @@ def build_context_bundle(
     summary = current.get("summary") or {}
 
     knn = predict_next_snapshot(history, lookback_days=lookback_days)
-    analogs = similar_setups(history, top_n=5, lookback_days=lookback_days)
+    analogs = similar_setups(history, top_n=3 if slim else 5, lookback_days=lookback_days)
 
-    recent = enriched[-intraday_points:]
+    recent = enriched[-(8 if slim else intraday_points):]
     timeline = [
         {
             "ts": row["ts"],
@@ -79,8 +80,8 @@ def build_context_bundle(
             "vix_level": summary.get("vix_level"),
             "spy_return": summary.get("spy_return"),
         },
-        "top_strikes": _top_strikes(current.get("strike", pd.Series(dtype=float))),
-        "gex_by_expiration": exp_json if isinstance(exp_json, dict) else {},
+        "top_strikes": _top_strikes(current.get("strike", pd.Series(dtype=float)), n=6 if slim else 8),
+        "gex_by_expiration": (dict(list(exp_json.items())[:4]) if isinstance(exp_json, dict) and slim else exp_json) if isinstance(exp_json, dict) else {},
         "intraday_timeline": timeline,
         "knn_forecast": _slim_knn(knn),
         "similar_setups": analogs,
@@ -89,6 +90,10 @@ def build_context_bundle(
 
 def bundle_to_prompt_json(bundle: dict[str, Any]) -> str:
     return json.dumps(bundle, indent=2, default=str)
+
+
+def estimate_token_count(bundle: dict[str, Any]) -> int:
+    return max(1, len(bundle_to_prompt_json(bundle)) // 4)
 
 
 def _slim_knn(knn: dict[str, Any] | None) -> dict[str, Any] | None:

@@ -240,7 +240,27 @@ def predict_next_snapshot(
         recency_weights=recency_weights,
     )
     preds["total_gex"] = current["total_gex"] + preds["delta_gex"]
+    knn_delta = preds["delta_gex"]
+    gboost_delta = None
+    try:
+        from models.gboost import predict_gboost_delta
+
+        gboost_delta = predict_gboost_delta(history, current.get("ticker", config.DEFAULT_TICKER))
+        if gboost_delta is not None:
+            w = config.GBOOST_BLEND_WEIGHT
+            preds["delta_gex"] = (1 - w) * preds["delta_gex"] + w * gboost_delta
+            preds["total_gex"] = current["total_gex"] + preds["delta_gex"]
+    except Exception:
+        pass
+
     confidence, confidence_breakdown = _calibrate_confidence(confidence, len(train))
+    try:
+        from models.calibration import apply_calibration
+
+        confidence, cal_extra = apply_calibration(confidence, current.get("ticker", config.DEFAULT_TICKER))
+        confidence_breakdown.update(cal_extra)
+    except Exception:
+        pass
 
     neighbors = []
     for rank, i in enumerate(nn_idx, start=1):
@@ -300,6 +320,9 @@ def predict_next_snapshot(
         "training_window_days": lookback_days,
         "forecast_horizon": "next_snapshot",
         "model": "weighted_knn",
+        "knn_delta_gex": knn_delta,
+        "gboost_delta_gex": gboost_delta,
+        "blend_weight_gboost": config.GBOOST_BLEND_WEIGHT if gboost_delta is not None else 0.0,
     }
 
 

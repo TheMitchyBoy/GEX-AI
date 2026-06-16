@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 import config
@@ -15,7 +16,8 @@ from db.features import (
     strike_series_from_strikes_df,
     term_structure_breakdown,
 )
-from db.queries import fetch_snapshot_strikes, fetch_snapshots
+from db.json_fallbacks import resolve_strike_series
+from db.queries import fetch_snapshot_strikes_bulk, fetch_snapshots
 
 
 def snapshot_to_history_dict(
@@ -28,10 +30,7 @@ def snapshot_to_history_dict(
 
         summary = json.loads(summary)
 
-    strike, cumulative = strike_series_from_strikes_df(strikes_df) if strikes_df is not None else (
-        pd.Series(dtype=float),
-        pd.Series(dtype=float),
-    )
+    strike, cumulative = resolve_strike_series(strikes_df, row)
 
     exp = expiration_series_from_json(row.get("expiration_json"))
     market_date = row.get("market_date")
@@ -48,6 +47,9 @@ def snapshot_to_history_dict(
         "strike": strike,
         "cumulative": cumulative,
         "summary": summary,
+        "surface_json": row.get("surface_json"),
+        "greek_exposure_json": row.get("greek_exposure_json"),
+        "expiration_json": row.get("expiration_json"),
         **term,
     }
     apply_summary_fields(metrics, summary)
@@ -65,12 +67,11 @@ def load_snapshot_history(
 
     with get_connection() as conn:
         rows = fetch_snapshots(conn, ticker, lookback_days=lookback_days)
-        history: list[dict[str, Any]] = []
-        for row in rows:
-            strikes_df = None
-            if include_strikes:
-                strikes_df = fetch_snapshot_strikes(conn, ticker, row["ts"])
-            history.append(snapshot_to_history_dict(row, strikes_df))
+        strikes_by_ts: dict[str, pd.DataFrame] = {}
+        if include_strikes and rows:
+            strikes_by_ts = fetch_snapshot_strikes_bulk(conn, ticker, [r["ts"] for r in rows])
+
+        history = [snapshot_to_history_dict(row, strikes_by_ts.get(row["ts"])) for row in rows]
     return history
 
 
@@ -95,3 +96,32 @@ def history_to_dataframe(history: list[dict[str, Any]]) -> pd.DataFrame:
             }
         )
     return pd.DataFrame(records)
+
+
+def materialize_features_for_history(history: list[dict[str, Any]]) -> int:
+    """Write precomputed features to snapshot_features table."""
+    from db.queries import upsert_snapshot_features
+
+    count = 0
+    ticker = history[0].get("ticker", config.DEFAULT_TICKER) if history else config.DEFAULT_TICKER
+    with get_connection() as conn:
+        for h in history:
+            enriched = enrich_snapshot_metrics(h.copy())
+            sv = enriched.get("surface_vector", np.zeros(config.SURFACE_BINS))
+            feature_json = {
+                "total_gex": enriched["total_gex"],
+                "gamma_flip": enriched.get("gamma_flip"),
+                "call_wall": enriched.get("call_wall"),
+                "put_wall": enriched.get("put_wall"),
+                "near_term_ratio": enriched.get("near_term_ratio"),
+                "flip_distance_pct": enriched.get("flip_distance_pct"),
+            }
+            upsert_snapshot_features(
+                conn,
+                ticker=ticker,
+                ts=enriched["ts"],
+                feature_json=feature_json,
+                surface_vector=sv.tolist() if hasattr(sv, "tolist") else list(sv),
+            )
+            count += 1
+    return count

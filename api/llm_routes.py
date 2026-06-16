@@ -30,6 +30,7 @@ def llm_status() -> dict[str, Any]:
         "model": config.LLM_MODEL if is_llm_configured() else None,
         "write_predictions": config.WRITE_PREDICTIONS,
         "prediction_source": config.LLM_PREDICTION_SOURCE,
+        "cache_enabled": config.LLM_CACHE_ENABLED,
     }
 
 

@@ -12,7 +12,14 @@ Standalone read-only analytics and prediction app for gamma exposure (GEX) data 
 - **Walk-forward backtest** — MAE on ΔGEX, regime accuracy, spot bias hit rate, interval coverage
 - **Streamlit dashboard** — live regime, forecast card, intraday charts, strike heatmap
 - **FastAPI** — `/forecast`, `/history`, `/similar`, `/backtest`, `/strikes`, `/llm/*`
-- **Forecast poller** — optional job to detect new `ts` and write to `llm_predictions`
+- **Gradient boosting overlay** — optional sklearn GBM blend with KNN (`scripts/train_model.py`)
+- **Multi-horizon forecasts** — h1/h3/h6 snapshot horizons on `/forecast`
+- **Prediction reconciliation** — resolves `llm_predictions` against next snapshot
+- **LLM cache** — avoids re-calling OpenAI on dashboard refresh
+- **Alerts** — webhook on regime flip / near-flip / large ΔGEX
+- **API security** — optional `API_KEY`, rate limiting, cache headers
+- **Docker / Procfile** — web, dashboard, worker process types
+- **CI** — pytest + synthetic backtest gate
 
 ## Quick start
 

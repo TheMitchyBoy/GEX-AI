@@ -14,13 +14,13 @@ import config
 from db.connection import get_connection
 from db.features import enrich_snapshot_metrics, safe_float
 from db.loader import load_snapshot_history
-from db.queries import fetch_intraday_timeline, fetch_snapshot_strikes, get_latest_ts
+from db.queries import fetch_calibration_stats, fetch_daily_insights, fetch_intraday_timeline, fetch_snapshot_strikes, get_latest_ts
 from models.backtest import run_backtest
 from models.llm_predict import generate_llm_forecast
+from models.multi_horizon import predict_multi_horizon
 from models.predict import predict_next_snapshot, similar_setups
 
 st.set_page_config(page_title="GEX Analytics", layout="wide", page_icon="📊")
-
 REFRESH_SEC = config.FORECAST_POLL_SEC
 
 
@@ -29,217 +29,119 @@ def cached_history(ticker: str, lookback_days: int) -> list[dict]:
     return load_snapshot_history(ticker, lookback_days=lookback_days)
 
 
-def render_metric_row(latest: dict, forecast: dict | None) -> None:
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Spot", f"{safe_float(latest.get('spot')):,.2f}")
-    c2.metric("Total GEX", f"{safe_float(latest.get('total_gex')):.3f} Bn$/1%")
-    c3.metric("Regime", latest.get("regime") or "—")
-    c4.metric("Gamma Flip", f"{safe_float(latest.get('gamma_flip')):,.2f}")
-    if forecast:
-        c5.metric(
-            "Forecast ΔGEX",
-            f"{forecast['predicted_delta_gex']:.3f}",
-            delta=f"conf {forecast['confidence']:.0%}",
-        )
-    else:
-        c5.metric("Forecast", "Insufficient data")
-
-
-def render_forecast_card(forecast: dict) -> None:
-    st.subheader("Next Snapshot Forecast (~10 min)")
-    cols = st.columns(4)
-    cols[0].write(f"**Predicted total GEX:** {forecast['predicted_total_gex']:.3f}")
-    cols[1].write(f"**Predicted regime:** {forecast['predicted_regime']}")
-    cols[2].write(f"**Predicted flip:** {forecast['predicted_flip']:,.2f}")
-    cols[3].write(f"**Spot bias:** {forecast['spot_bias']}")
-
-    interval = forecast.get("prediction_interval", {})
-    st.progress(min(max(forecast["confidence"], 0.0), 1.0))
-    st.caption(
-        f"ΔGEX interval [{interval.get('low', 0):.3f}, {interval.get('high', 0):.3f}] · "
-        f"Regime flip P={forecast.get('regime_flip_probability', 0):.0%}"
-    )
+def render_compare(knn: dict | None, llm: dict | None) -> None:
+    st.subheader("KNN vs LLM")
+    c1, c2, c3 = st.columns(3)
+    if knn:
+        c1.metric("KNN ΔGEX", f"{knn.get('predicted_delta_gex', 0):.3f}", knn.get("predicted_regime"))
+    if llm:
+        c2.metric("LLM ΔGEX", f"{llm.get('predicted_delta_gex_bn', 0):.3f}", llm.get("predicted_regime"))
+        c2.caption(f"bias: {llm.get('spot_bias')} · conf {llm.get('confidence', 0):.0%}")
+    if knn and llm:
+        agree = knn.get("predicted_regime") == llm.get("predicted_regime")
+        c3.metric("Regime agreement", "Yes" if agree else "No")
 
 
 def plot_intraday(timeline: pd.DataFrame, forecast: dict | None, enriched: dict) -> go.Figure:
     fig = make_subplots(specs=[[{"secondary_y": True}]])
-    fig.add_trace(
-        go.Scatter(x=timeline["ts"], y=timeline["spot"], name="Spot", line=dict(color="#2563eb")),
-        secondary_y=False,
-    )
+    fig.add_trace(go.Scatter(x=timeline["ts"], y=timeline["spot"], name="Spot", line=dict(color="#2563eb")), secondary_y=False)
     if "gamma_flip" in timeline.columns and timeline["gamma_flip"].notna().any():
-        fig.add_trace(
-            go.Scatter(
-                x=timeline["ts"],
-                y=timeline["gamma_flip"],
-                name="Gamma flip",
-                line=dict(color="#f59e0b", dash="dash"),
-            ),
-            secondary_y=False,
-        )
-    fig.add_trace(
-        go.Scatter(
-            x=timeline["ts"],
-            y=timeline["total_gex"],
-            name="Total GEX",
-            line=dict(color="#10b981"),
-        ),
-        secondary_y=True,
-    )
-    if forecast and timeline["ts"].iloc[-1]:
-        last_ts = timeline["ts"].iloc[-1]
-        fig.add_trace(
-            go.Scatter(
-                x=[last_ts, f"{last_ts}*"],
-                y=[timeline["spot"].iloc[-1], safe_float(enriched.get("spot"))],
-                name="Predicted path (spot hold)",
-                line=dict(color="#ef4444", dash="dot"),
-                mode="lines+markers",
-            ),
-            secondary_y=False,
-        )
-    fig.update_layout(height=420, margin=dict(l=20, r=20, t=40, b=20), legend=dict(orientation="h"))
+        fig.add_trace(go.Scatter(x=timeline["ts"], y=timeline["gamma_flip"], name="Gamma flip", line=dict(color="#f59e0b", dash="dash")), secondary_y=False)
+    fig.add_trace(go.Scatter(x=timeline["ts"], y=timeline["total_gex"], name="Total GEX", line=dict(color="#10b981")), secondary_y=True)
+    fig.update_layout(height=420, margin=dict(l=20, r=20, t=40, b=20))
     fig.update_yaxes(title_text="Spot", secondary_y=False)
     fig.update_yaxes(title_text="GEX (Bn$/1%)", secondary_y=True)
     return fig
 
 
 def plot_strike_heatmap(strikes_df: pd.DataFrame, spot: float) -> go.Figure:
-    fig = go.Figure()
     colors = ["#10b981" if v >= 0 else "#ef4444" for v in strikes_df["gex_bn_per_pct"]]
-    fig.add_trace(
-        go.Bar(
-            x=strikes_df["strike"],
-            y=strikes_df["gex_bn_per_pct"],
-            marker_color=colors,
-            name="GEX / strike",
-        )
-    )
+    fig = go.Figure(go.Bar(x=strikes_df["strike"], y=strikes_df["gex_bn_per_pct"], marker_color=colors))
     fig.add_vline(x=spot, line_dash="dash", line_color="#2563eb", annotation_text="Spot")
-    fig.update_layout(height=360, margin=dict(l=20, r=20, t=30, b=20), xaxis_title="Strike", yaxis_title="GEX Bn$/1%")
+    fig.update_layout(height=360, xaxis_title="Strike", yaxis_title="GEX Bn$/1%")
     return fig
+
+
+@st.fragment(run_every=REFRESH_SEC)
+def live_panel(ticker: str, lookback: int) -> tuple[list, dict, dict | None, dict | None]:
+    history = cached_history(ticker, lookback)
+    enriched = enrich_snapshot_metrics(history[-1].copy()) if history else {}
+    forecast = predict_next_snapshot(history, lookback_days=lookback) if len(history) >= config.MIN_KNN_SNAPSHOTS else None
+    llm = generate_llm_forecast(history, lookback_days=lookback, persist=False) if len(history) >= config.MIN_KNN_SNAPSHOTS else None
+    return history, enriched, forecast, llm
 
 
 def main() -> None:
     st.title("GEX Prediction & Analytics")
-    st.caption("Read-only consumer of Railway Postgres GEX snapshots")
-
     if not config.DATABASE_URL:
-        st.error("DATABASE_URL is not configured. Set it in `.env` and restart.")
+        st.error("DATABASE_URL is not configured.")
         st.stop()
 
-    ticker = st.sidebar.text_input("Ticker", value=config.DEFAULT_TICKER).upper()
+    ticker = st.sidebar.selectbox("Ticker", config.SUPPORTED_TICKERS, index=config.SUPPORTED_TICKERS.index(config.DEFAULT_TICKER) if config.DEFAULT_TICKER in config.SUPPORTED_TICKERS else 0)
     lookback = st.sidebar.slider("Lookback days", 7, 180, config.LOOKBACK_DAYS)
-    auto_refresh = st.sidebar.checkbox("Auto-refresh", value=True)
+    st.sidebar.caption(f"Auto-refresh every {REFRESH_SEC}s")
 
     try:
         with get_connection() as conn:
             latest_ts = get_latest_ts(conn, ticker)
-        history = cached_history(ticker, lookback)
+        history, enriched, forecast, llm = live_panel(ticker, lookback)
     except Exception as exc:
         st.error(f"Database error: {exc}")
         st.stop()
 
-    if len(history) < config.MIN_KNN_SNAPSHOTS:
-        st.warning(f"Only {len(history)} snapshots — need at least {config.MIN_KNN_SNAPSHOTS} for forecasts.")
+    st.sidebar.write(f"Latest ts: `{latest_ts}` · {len(history)} snapshots")
 
-    enriched_latest = enrich_snapshot_metrics(history[-1].copy()) if history else {}
-    forecast = predict_next_snapshot(history, lookback_days=lookback) if len(history) >= config.MIN_KNN_SNAPSHOTS else None
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Spot", f"{safe_float(enriched.get('spot')):,.2f}")
+    c2.metric("Total GEX", f"{safe_float(enriched.get('total_gex')):.3f}")
+    c3.metric("Regime", enriched.get("regime") or "—")
+    c4.metric("Gamma Flip", f"{safe_float(enriched.get('gamma_flip')):,.2f}")
+    c5.metric("Forecast ΔGEX", f"{forecast['predicted_delta_gex']:.3f}" if forecast else "—")
 
-    st.sidebar.write(f"Latest ts: `{latest_ts}`")
-    st.sidebar.write(f"Snapshots loaded: {len(history)}")
+    render_compare(forecast, llm)
 
-    render_metric_row(enriched_latest, forecast)
     if forecast:
-        render_forecast_card(forecast)
+        st.progress(min(max(forecast["confidence"], 0.0), 1.0))
+        horizons = predict_multi_horizon(history, lookback_days=lookback)
+        if len(horizons) > 1:
+            st.caption("Multi-horizon: " + " · ".join(f"h{h}={v['predicted_delta_gex']:.3f}" for h, v in horizons.items()))
 
-    market_date = enriched_latest.get("market_date") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    market_date = enriched.get("market_date") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     with get_connection() as conn:
         timeline = fetch_intraday_timeline(conn, ticker, market_date)
-        strikes_df = fetch_snapshot_strikes(conn, ticker, enriched_latest["ts"]) if history else pd.DataFrame()
+        strikes_df = fetch_snapshot_strikes(conn, ticker, enriched["ts"]) if history else pd.DataFrame()
+        cal = fetch_calibration_stats(conn, ticker)
+        insights = fetch_daily_insights(conn, ticker, limit=3)
 
     if not timeline.empty:
-        timeline["gamma_flip"] = timeline["summary_json"].apply(
-            lambda s: safe_float((s or {}).get("gamma_flip")) if isinstance(s, dict) else 0.0
-        )
-    else:
-        timeline = pd.DataFrame(
-            [
-                {
-                    "ts": h["ts"],
-                    "spot": h["spot"],
-                    "total_gex": h["total_gex"],
-                    "gamma_flip": safe_float(h.get("gamma_flip")),
-                }
-                for h in history
-                if h.get("market_date") == market_date
-            ]
-        )
+        timeline["gamma_flip"] = timeline["summary_json"].apply(lambda s: safe_float((s or {}).get("gamma_flip")) if isinstance(s, dict) else 0.0)
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Intraday", "Strike Heatmap", "Similar Setups", "Backtest", "LLM Insights"])
-
-    with tab1:
+    tabs = st.tabs(["Intraday", "Strikes", "Similar", "Backtest", "LLM", "Accuracy"])
+    with tabs[0]:
         if not timeline.empty:
-            st.plotly_chart(plot_intraday(timeline, forecast, enriched_latest), use_container_width=True)
-        else:
-            st.info("No intraday timeline for selected market date.")
-
-    with tab2:
+            st.plotly_chart(plot_intraday(timeline, forecast, enriched), use_container_width=True)
+    with tabs[1]:
         if not strikes_df.empty:
-            st.plotly_chart(
-                plot_strike_heatmap(strikes_df, safe_float(enriched_latest.get("spot"))),
-                use_container_width=True,
-            )
-            call_wall = enriched_latest.get("call_wall")
-            put_wall = enriched_latest.get("put_wall")
-            st.write(f"Call wall: **{call_wall:,.0f}** · Put wall: **{put_wall:,.0f}**")
-        else:
-            st.info("No strike profile for latest snapshot.")
-
-    with tab3:
+            st.plotly_chart(plot_strike_heatmap(strikes_df, safe_float(enriched.get("spot"))), use_container_width=True)
+    with tabs[2]:
         setups = similar_setups(history, lookback_days=lookback) if len(history) >= 3 else []
         if setups:
             st.dataframe(pd.DataFrame(setups), use_container_width=True, hide_index=True)
-        else:
-            st.info("Not enough history for similarity search.")
-
-    with tab4:
+    with tabs[3]:
         if len(history) >= config.MIN_KNN_SNAPSHOTS + 5:
-            report = run_backtest(history, lookback_days=min(lookback, 30))
-            st.json(report.to_dict())
-            if report.rows:
-                st.dataframe(pd.DataFrame(report.rows).tail(20), use_container_width=True, hide_index=True)
-        else:
-            st.info("Need more snapshots for backtest.")
-
-    with tab5:
-        st.subheader("LLM Market Analysis")
-        if not config.OPENAI_API_KEY:
-            st.info("Set `OPENAI_API_KEY` in `.env` to enable LLM forecasts. Showing KNN fallback.")
-        if len(history) >= config.MIN_KNN_SNAPSHOTS:
-            llm_result = generate_llm_forecast(history, lookback_days=lookback, persist=False)
-            st.write(f"**Source:** {llm_result.get('prediction_source')} · **Confidence:** {llm_result.get('confidence', 0):.0%}")
-            st.write(f"**Regime:** {llm_result.get('predicted_regime')} · **Spot bias:** {llm_result.get('spot_bias')}")
-            if llm_result.get("reasoning"):
-                st.markdown(llm_result["reasoning"])
-            if llm_result.get("predictions"):
-                st.markdown("**Predictions**")
-                for item in llm_result["predictions"]:
-                    st.markdown(f"- {item}")
-            if llm_result.get("scenarios"):
-                st.dataframe(pd.DataFrame(llm_result["scenarios"]), use_container_width=True, hide_index=True)
-            with st.expander("Full LLM response"):
-                st.json(llm_result)
-        else:
-            st.info("Need more snapshots for LLM analysis.")
-
-    if forecast and forecast.get("last_move_attribution"):
-        with st.expander("Structural attribution (last move)"):
-            st.json(forecast["last_move_attribution"])
-
-    if auto_refresh:
-        time.sleep(REFRESH_SEC)
-        st.rerun()
+            st.json(run_backtest(history, lookback_days=min(lookback, 30)).to_dict())
+    with tabs[4]:
+        if llm:
+            st.write(llm.get("reasoning", ""))
+            for p in llm.get("predictions", []):
+                st.markdown(f"- {p}")
+            st.json(llm)
+    with tabs[5]:
+        st.json(cal)
+        if insights:
+            st.subheader("Daily insights")
+            for row in insights:
+                st.json(row.get("payload_json"))
 
 
 if __name__ == "__main__":

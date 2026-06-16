@@ -9,9 +9,10 @@ from typing import Any
 import config
 from db.connection import get_connection
 from db.features import safe_float
-from db.queries import insert_prediction
-from models.llm_client import is_llm_configured, openai_chat_json, parse_prediction_json
-from models.llm_context import build_context_bundle, bundle_to_prompt_json
+from db.queries import insert_prediction_deduped
+from models.llm_cache import get_cached, set_cached
+from models.llm_client import is_llm_configured, openai_chat_json
+from models.llm_context import build_context_bundle, bundle_to_prompt_json, estimate_token_count
 from models.predict import predict_next_snapshot
 
 logger = logging.getLogger(__name__)
@@ -119,7 +120,15 @@ def generate_llm_forecast(
     lookback_days = lookback_days if lookback_days is not None else config.LOOKBACK_DAYS
     persist = config.WRITE_PREDICTIONS if persist is None else persist
 
-    bundle = build_context_bundle(history, lookback_days=lookback_days)
+    bundle = build_context_bundle(history, lookback_days=lookback_days, slim=True)
+    ts = bundle.get("snapshot_ts")
+    ticker = bundle.get("ticker", config.DEFAULT_TICKER)
+    if ts:
+        cached = get_cached(str(ticker), str(ts))
+        if cached:
+            cached["from_cache"] = True
+            return cached
+
     knn = predict_next_snapshot(history, lookback_days=lookback_days)
 
     result: dict[str, Any] | None = None
@@ -155,6 +164,15 @@ def generate_llm_forecast(
                 source="insufficient_data",
             )
 
+    try:
+        from models.calibration import apply_calibration
+
+        conf, cal = apply_calibration(float(result.get("confidence", 0.5)), str(ticker), source="llm" if result.get("llm_enhanced") else None)
+        result["confidence"] = conf
+        result["calibration"] = cal
+    except Exception:
+        pass
+
     out = {
         **result,
         "ticker": bundle.get("ticker"),
@@ -168,8 +186,12 @@ def generate_llm_forecast(
             "similar_setup_count": len(bundle.get("similar_setups", [])),
             "llm_configured": is_llm_configured(),
             "llm_error": llm_error,
+            "estimated_tokens": estimate_token_count(bundle),
         },
     }
+
+    if ts:
+        set_cached(str(ticker), str(ts), out)
 
     if persist and bundle.get("snapshot_ts"):
         _persist_prediction(out)
@@ -195,7 +217,7 @@ def _persist_prediction(prediction: dict[str, Any]) -> None:
     }
     try:
         with get_connection() as conn:
-            insert_prediction(
+            insert_prediction_deduped(
                 conn,
                 ticker=str(prediction.get("ticker", config.DEFAULT_TICKER)),
                 snapshot_ts=str(prediction["snapshot_ts"]),
