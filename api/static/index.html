@@ -1,0 +1,769 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GEX Hub — Dashboard & Agent</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0b1220;
+      --panel: #111827;
+      --panel-2: #0d1526;
+      --border: #1f2937;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --accent: #3b82f6;
+      --green: #10b981;
+      --red: #ef4444;
+      --amber: #f59e0b;
+      --user: #1e3a5f;
+      --bot: #14201a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    header {
+      padding: 0.85rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      background: var(--panel);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    header h1 { margin: 0; font-size: 1.2rem; font-weight: 600; letter-spacing: -0.02em; }
+    header .status { font-size: 0.78rem; color: var(--muted); margin-top: 0.15rem; }
+    .page { max-width: 1400px; margin: 0 auto; padding: 1rem 1.25rem 2rem; }
+    section {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      margin-bottom: 1.25rem;
+      overflow: hidden;
+    }
+    .section-head {
+      padding: 0.85rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+      background: var(--panel-2);
+    }
+    .section-head h2 { margin: 0; font-size: 0.95rem; font-weight: 600; color: var(--text); }
+    .section-head .controls { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+    select, input[type="password"], input[type="text"] {
+      padding: 0.45rem 0.65rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      font-size: 0.85rem;
+    }
+    .pill {
+      font-size: 0.72rem;
+      color: var(--muted);
+      padding: 0.25rem 0.55rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+    }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 0.75rem;
+      padding: 1rem 1.25rem;
+    }
+    .metric {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.75rem 0.9rem;
+    }
+    .metric .label { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+    .metric .value { font-size: 1.35rem; font-weight: 600; margin-top: 0.25rem; line-height: 1.2; }
+    .metric .sub { font-size: 0.75rem; color: var(--muted); margin-top: 0.2rem; }
+    .compare {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.75rem;
+      padding: 0 1.25rem 1rem;
+    }
+    .compare .metric .value { font-size: 1.1rem; }
+    .confidence-wrap { padding: 0 1.25rem 1rem; }
+    .confidence-bar {
+      height: 6px;
+      border-radius: 999px;
+      background: var(--border);
+      overflow: hidden;
+    }
+    .confidence-bar > div {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--green));
+      width: 0%;
+      transition: width 0.4s ease;
+    }
+    .horizons { font-size: 0.75rem; color: var(--muted); margin-top: 0.45rem; }
+    .charts {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      padding: 0 1.25rem 1.25rem;
+    }
+    .chart-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.75rem;
+      min-height: 280px;
+    }
+    .chart-card h3 { margin: 0 0 0.5rem; font-size: 0.8rem; color: var(--muted); font-weight: 500; }
+    .chart-wrap { position: relative; height: 240px; }
+    .dash-error { color: var(--red); font-size: 0.82rem; padding: 0 1.25rem 1rem; }
+    .agent-layout {
+      display: grid;
+      grid-template-columns: 240px 1fr;
+      min-height: 420px;
+    }
+    aside {
+      border-right: 1px solid var(--border);
+      padding: 1rem;
+      overflow-y: auto;
+      background: var(--panel-2);
+    }
+    aside label { font-size: 0.72rem; color: var(--muted); display: block; margin-bottom: 0.3rem; }
+    aside select, aside input { width: 100%; margin-bottom: 0.65rem; }
+    .prompt-btn {
+      display: block;
+      width: 100%;
+      text-align: left;
+      margin-bottom: 0.45rem;
+      padding: 0.5rem 0.6rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+      font-size: 0.76rem;
+      cursor: pointer;
+    }
+    .prompt-btn:hover { border-color: var(--accent); }
+    main.chat-main {
+      display: flex;
+      flex-direction: column;
+      min-height: 420px;
+    }
+    #messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1rem 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.65rem;
+      max-height: 480px;
+    }
+    .msg {
+      max-width: 88%;
+      padding: 0.7rem 0.95rem;
+      border-radius: 12px;
+      line-height: 1.5;
+      font-size: 0.9rem;
+      white-space: pre-wrap;
+    }
+    .msg.user { align-self: flex-end; background: var(--user); }
+    .msg.assistant { align-self: flex-start; background: var(--bot); border: 1px solid var(--border); }
+    .msg-meta { font-size: 0.7rem; color: var(--muted); margin-top: 0.3rem; }
+    .msg-meta .tag { display: inline-block; background: var(--panel); padding: 0.1rem 0.35rem; border-radius: 4px; margin-right: 0.3rem; }
+    .feedback { margin-top: 0.35rem; }
+    .feedback button { background: transparent; border: 1px solid var(--border); color: var(--muted); border-radius: 6px; padding: 0.12rem 0.45rem; cursor: pointer; margin-right: 0.3rem; font-size: 0.72rem; }
+    .composer {
+      border-top: 1px solid var(--border);
+      padding: 0.85rem 1.25rem;
+      display: flex;
+      gap: 0.5rem;
+      background: var(--panel-2);
+    }
+    #input {
+      flex: 1;
+      padding: 0.7rem 0.95rem;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      resize: none;
+      min-height: 44px;
+      max-height: 120px;
+      font-family: inherit;
+      font-size: 0.9rem;
+    }
+    button.send {
+      padding: 0 1.15rem;
+      border: none;
+      border-radius: 10px;
+      background: var(--accent);
+      color: white;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    button.send:disabled { opacity: 0.5; cursor: not-allowed; }
+    .error, .warn { font-size: 0.82rem; padding: 0 1.25rem 0.4rem; }
+    .error { color: var(--red); }
+    .warn { color: var(--amber); }
+    .msg.thinking { align-self: flex-start; background: var(--panel); border: 1px dashed var(--border); color: var(--muted); font-style: italic; }
+    @keyframes pulse { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
+    .msg.thinking { animation: pulse 1.5s ease-in-out infinite; }
+    .regime-long { color: var(--green); }
+    .regime-short { color: var(--red); }
+    @media (max-width: 1024px) {
+      .metrics { grid-template-columns: repeat(3, 1fr); }
+      .charts { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 768px) {
+      .metrics, .compare { grid-template-columns: repeat(2, 1fr); }
+      .agent-layout { grid-template-columns: 1fr; }
+      aside { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>GEX Hub</h1>
+      <div class="status" id="status">Connecting…</div>
+    </div>
+    <span class="pill" id="refreshPill">Auto-refresh 60s</span>
+  </header>
+
+  <div class="page">
+    <section class="dashboard" aria-label="GEX dashboard">
+      <div class="section-head">
+        <h2>Live Dashboard</h2>
+        <div class="controls">
+          <label>
+            <span class="pill">Ticker</span>
+            <select id="ticker" aria-label="Ticker">
+              <option value="SPX" selected>SPX</option>
+            </select>
+          </label>
+          <span class="pill" id="snapshotPill">—</span>
+        </div>
+      </div>
+      <div class="metrics" id="metrics">
+        <div class="metric"><div class="label">Spot</div><div class="value" id="mSpot">—</div></div>
+        <div class="metric"><div class="label">Total GEX</div><div class="value" id="mGex">—</div><div class="sub">Bn$/1%</div></div>
+        <div class="metric"><div class="label">Regime</div><div class="value" id="mRegime">—</div></div>
+        <div class="metric"><div class="label">Gamma Flip</div><div class="value" id="mFlip">—</div></div>
+        <div class="metric"><div class="label">Forecast ΔGEX</div><div class="value" id="mDelta">—</div><div class="sub" id="mDeltaSub">next snapshot</div></div>
+      </div>
+      <div class="compare">
+        <div class="metric"><div class="label">KNN ΔGEX</div><div class="value" id="cKnn">—</div><div class="sub" id="cKnnRegime">—</div></div>
+        <div class="metric"><div class="label">LLM ΔGEX</div><div class="value" id="cLlm">—</div><div class="sub" id="cLlmMeta">—</div></div>
+        <div class="metric"><div class="label">Regime Agreement</div><div class="value" id="cAgree">—</div></div>
+      </div>
+      <div class="confidence-wrap">
+        <div class="confidence-bar"><div id="confBar"></div></div>
+        <div class="horizons" id="horizons"></div>
+      </div>
+      <div class="dash-error" id="dashError"></div>
+      <div class="charts">
+        <div class="chart-card">
+          <h3>Intraday — spot &amp; GEX</h3>
+          <div class="chart-wrap"><canvas id="intradayChart"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Strike GEX profile</h3>
+          <div class="chart-wrap"><canvas id="strikeChart"></canvas></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="agent" aria-label="GEX agent chat">
+      <div class="section-head">
+        <h2>Market Agent</h2>
+        <span class="pill">Conversational desk analyst</span>
+      </div>
+      <div class="agent-layout">
+        <aside>
+          <label for="mode">Mode</label>
+          <select id="mode">
+            <option value="fast" selected>Fast (1 API call)</option>
+            <option value="deep">Deep (tools + two-pass)</option>
+            <option value="quant">Quant only (no LLM)</option>
+          </select>
+          <label><input type="checkbox" id="stream" /> Stream response (experimental)</label>
+          <label for="apiKey">API key (if required)</label>
+          <input id="apiKey" type="password" placeholder="X-API-Key (optional)" />
+          <label>Suggested prompts</label>
+          <div id="prompts"></div>
+        </aside>
+        <main class="chat-main">
+          <div id="messages"></div>
+          <div class="warn" id="warn"></div>
+          <div class="error" id="error"></div>
+          <div class="composer">
+            <textarea id="input" rows="1" placeholder="Ask about regime, flip, walls, forecasts…"></textarea>
+            <button class="send" id="send">Send</button>
+          </div>
+        </main>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const REFRESH_MS = 60000;
+    const messagesEl = document.getElementById('messages');
+    const inputEl = document.getElementById('input');
+    const sendBtn = document.getElementById('send');
+    const errorEl = document.getElementById('error');
+    const warnEl = document.getElementById('warn');
+    const statusEl = document.getElementById('status');
+    const tickerEl = document.getElementById('ticker');
+    const apiKeyEl = document.getElementById('apiKey');
+    const promptsEl = document.getElementById('prompts');
+    const modeEl = document.getElementById('mode');
+    const streamEl = document.getElementById('stream');
+    const dashErrorEl = document.getElementById('dashError');
+
+    let chatHistory = [];
+    let thinkingEl = null;
+    let lastReply = '';
+    let lastSnapshotTs = null;
+    const sessionId = localStorage.getItem('gex_session_id') || ('s-' + Math.random().toString(36).slice(2, 10));
+    localStorage.setItem('gex_session_id', sessionId);
+    const CHAT_TIMEOUT_MS = 120000;
+
+    let intradayChart = null;
+    let strikeChart = null;
+    let dashTimer = null;
+
+    function fmtNum(n, dec = 2) {
+      if (n == null || Number.isNaN(n)) return '—';
+      return Number(n).toLocaleString(undefined, { minimumFractionDigits: dec, maximumFractionDigits: dec });
+    }
+
+    function regimeClass(r) {
+      if (!r) return '';
+      return String(r).toLowerCase().includes('long') ? 'regime-long' : 'regime-short';
+    }
+
+    function headers() {
+      const h = { 'Content-Type': 'application/json' };
+      const key = apiKeyEl.value.trim() || localStorage.getItem('gex_api_key');
+      if (key) h['X-API-Key'] = key;
+      return h;
+    }
+
+    function marketDateFromTs(ts) {
+      if (!ts) return null;
+      const m = String(ts).match(/^(\d{4}-\d{2}-\d{2})/);
+      return m ? m[1] : null;
+    }
+
+    async function fetchJson(url) {
+      const r = await fetch(url, { headers: headers() });
+      if (!r.ok) {
+        const text = await r.text();
+        let detail = text;
+        try { detail = JSON.parse(text).detail || text; } catch (_) {}
+        throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+      }
+      return r.json();
+    }
+
+    function updateMetrics(forecast, compare) {
+      document.getElementById('mSpot').textContent = fmtNum(forecast.current_spot);
+      document.getElementById('mGex').textContent = fmtNum(forecast.current_total_gex, 3);
+      const regimeEl = document.getElementById('mRegime');
+      regimeEl.textContent = forecast.current_regime || forecast.predicted_regime || '—';
+      regimeEl.className = 'value ' + regimeClass(forecast.current_regime || forecast.predicted_regime);
+      document.getElementById('mFlip').textContent = fmtNum(forecast.current_gamma_flip);
+      document.getElementById('mDelta').textContent = fmtNum(forecast.predicted_delta_gex, 3);
+      document.getElementById('mDeltaSub').textContent = (forecast.predicted_regime || 'next snapshot');
+      document.getElementById('confBar').style.width = Math.round((forecast.confidence || 0) * 100) + '%';
+      const hz = forecast.horizons;
+      document.getElementById('horizons').textContent = hz && Object.keys(hz).length > 1
+        ? 'Multi-horizon: ' + Object.entries(hz).map(([h, v]) => `h${h}=${Number(v.predicted_delta_gex).toFixed(3)}`).join(' · ')
+        : '';
+      document.getElementById('snapshotPill').textContent = forecast.current_snapshot_ts || '—';
+
+      if (compare) {
+        const knn = compare.knn;
+        const llm = compare.llm;
+        document.getElementById('cKnn').textContent = knn ? fmtNum(knn.predicted_delta_gex, 3) : '—';
+        document.getElementById('cKnnRegime').textContent = knn?.predicted_regime || '—';
+        document.getElementById('cLlm').textContent = llm ? fmtNum(llm.predicted_delta_gex_bn, 3) : '—';
+        document.getElementById('cLlmMeta').textContent = llm
+          ? `${llm.predicted_regime || '—'} · bias ${llm.spot_bias || '—'} · ${Math.round((llm.confidence || 0) * 100)}%`
+          : 'LLM off or unavailable';
+        const agree = compare.agreement?.regime;
+        document.getElementById('cAgree').textContent = agree == null ? '—' : (agree ? 'Yes' : 'No');
+      }
+    }
+
+    function buildIntradayChart(rows, spot) {
+      const labels = rows.map(r => {
+        const ts = r.ts || '';
+        const parts = String(ts).split(/[_T ]/);
+        return parts[1] ? parts[1].slice(0, 8) : ts;
+      });
+      const spots = rows.map(r => Number(r.spot));
+      const gex = rows.map(r => Number(r.total_gex));
+      const flips = rows.map(r => {
+        const s = r.summary_json;
+        if (s && typeof s === 'object') return Number(s.gamma_flip) || null;
+        return null;
+      });
+
+      const ctx = document.getElementById('intradayChart');
+      if (intradayChart) intradayChart.destroy();
+      intradayChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [
+            { label: 'Spot', data: spots, borderColor: '#2563eb', backgroundColor: 'rgba(37,99,235,0.1)', yAxisID: 'y', tension: 0.2, pointRadius: 0 },
+            { label: 'Gamma flip', data: flips, borderColor: '#f59e0b', borderDash: [4, 4], yAxisID: 'y', tension: 0.2, pointRadius: 0 },
+            { label: 'Total GEX', data: gex, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.08)', yAxisID: 'y1', tension: 0.2, pointRadius: 0 },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: { legend: { labels: { color: '#9ca3af', boxWidth: 12, font: { size: 10 } } } },
+          scales: {
+            x: { ticks: { color: '#6b7280', maxTicksLimit: 8 }, grid: { color: '#1f2937' } },
+            y: { position: 'left', ticks: { color: '#6b7280' }, grid: { color: '#1f2937' } },
+            y1: { position: 'right', ticks: { color: '#6b7280' }, grid: { drawOnChartArea: false } },
+          },
+        },
+      });
+    }
+
+    function buildStrikeChart(strikes, spot) {
+      const sorted = [...strikes].sort((a, b) => Number(a.strike) - Number(b.strike));
+      const labels = sorted.map(s => s.strike);
+      const values = sorted.map(s => Number(s.gex_bn_per_pct));
+      const colors = values.map(v => v >= 0 ? '#10b981' : '#ef4444');
+      const spotIdx = sorted.findIndex(s => Number(s.strike) >= Number(spot));
+
+      const ctx = document.getElementById('strikeChart');
+      if (strikeChart) strikeChart.destroy();
+      strikeChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{ label: 'GEX Bn$/1%', data: values, backgroundColor: colors }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            annotation: spot ? undefined : undefined,
+          },
+          scales: {
+            x: { ticks: { color: '#6b7280', maxTicksLimit: 12 }, grid: { display: false } },
+            y: { ticks: { color: '#6b7280' }, grid: { color: '#1f2937' } },
+          },
+        },
+      });
+      if (spotIdx >= 0 && strikeChart) {
+        strikeChart.options.plugins.subtitle = { display: true, text: `Spot ${fmtNum(spot)}`, color: '#2563eb' };
+        strikeChart.update();
+      }
+    }
+
+    async function loadDashboard() {
+      const ticker = tickerEl.value;
+      dashErrorEl.textContent = '';
+      try {
+        const [forecast, compare] = await Promise.all([
+          fetchJson(`/forecast/${ticker}?multi_horizon=true`),
+          fetchJson(`/compare/${ticker}`).catch(() => null),
+        ]);
+        updateMetrics(forecast, compare);
+
+        const mdate = marketDateFromTs(forecast.current_snapshot_ts);
+        const histUrl = mdate ? `/history/${ticker}?market_date=${mdate}` : `/history/${ticker}`;
+        const [history, strikes] = await Promise.all([
+          fetchJson(histUrl).catch(() => ({ rows: [] })),
+          fetchJson(`/strikes/${ticker}`).catch(() => ({ strikes: [] })),
+        ]);
+
+        if (history.rows && history.rows.length) {
+          buildIntradayChart(history.rows, forecast.current_spot);
+        }
+        if (strikes.strikes && strikes.strikes.length) {
+          buildStrikeChart(strikes.strikes, forecast.current_spot);
+        }
+      } catch (e) {
+        dashErrorEl.textContent = 'Dashboard: ' + (e.message || 'failed to load data');
+      }
+    }
+
+    function formatApiError(detail, status) {
+      if (!detail) {
+        if (status === 502 || status === 504) return `Gateway timeout (${status}) — try Fast mode without streaming`;
+        if (status === 503) return 'Service unavailable — check DATABASE_URL and OPENAI_API_KEY on Railway';
+        if (status) return `HTTP ${status} — request failed`;
+        return 'Request failed — check network and Railway logs';
+      }
+      if (typeof detail === 'string') return detail;
+      if (Array.isArray(detail)) return detail.map(x => x.msg || JSON.stringify(x)).join('; ');
+      return String(detail);
+    }
+
+    async function parseErrorResponse(r) {
+      const text = await r.text();
+      try {
+        const data = JSON.parse(text);
+        return formatApiError(data.detail, r.status);
+      } catch (_) {
+        if (text && text.length < 300) return text;
+        return formatApiError(null, r.status);
+      }
+    }
+
+    function setThinking(on) {
+      if (on && !thinkingEl) {
+        thinkingEl = document.createElement('div');
+        thinkingEl.className = 'msg assistant thinking';
+        thinkingEl.textContent = 'Analyzing GEX context…';
+        messagesEl.appendChild(thinkingEl);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      } else if (!on && thinkingEl) {
+        thinkingEl.remove();
+        thinkingEl = null;
+      }
+    }
+
+    function addMessage(role, content, meta, feedback) {
+      const div = document.createElement('div');
+      div.className = 'msg ' + role;
+      const textNode = document.createTextNode(content);
+      div.appendChild(textNode);
+      if (meta && role === 'assistant') {
+        const metaEl = document.createElement('div');
+        metaEl.className = 'msg-meta';
+        metaEl.innerHTML = meta;
+        div.appendChild(metaEl);
+      }
+      if (feedback && role === 'assistant') {
+        const fb = document.createElement('div');
+        fb.className = 'feedback';
+        const up = document.createElement('button');
+        up.textContent = '👍';
+        up.onclick = () => sendFeedback(1);
+        const down = document.createElement('button');
+        down.textContent = '👎';
+        down.onclick = () => sendFeedback(-1);
+        fb.appendChild(up);
+        fb.appendChild(down);
+        div.appendChild(fb);
+      }
+      messagesEl.appendChild(div);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+      return div;
+    }
+
+    async function sendFeedback(rating) {
+      try {
+        await fetch(`/llm/feedback/${tickerEl.value}`, {
+          method: 'POST',
+          headers: headers(),
+          body: JSON.stringify({
+            session_id: sessionId,
+            rating,
+            message: chatHistory.filter(m => m.role === 'user').slice(-1)[0]?.content,
+            reply: lastReply,
+            snapshot_ts: lastSnapshotTs,
+          }),
+        });
+      } catch (_) {}
+    }
+
+    function formatMeta(d) {
+      const tags = [];
+      if (d.from_cache) tags.push('<span class="tag">cached</span>');
+      if (d.two_pass) tags.push('<span class="tag">two-pass</span>');
+      if (d.tools_used && d.tools_used.length) tags.push('<span class="tag">tools: ' + d.tools_used.join(', ') + '</span>');
+      if (d.mode) tags.push('<span class="tag">' + d.mode + '</span>');
+      if (d.agreement?.score != null) tags.push('<span class="tag">agreement ' + d.agreement.score + '</span>');
+      const parts = [d.model, ...tags].filter(Boolean);
+      return parts.length ? parts.join(' · ') : '';
+    }
+
+    async function loadHealth() {
+      try {
+        const d = await fetchJson('/health');
+        const llm = d.llm_configured ? 'LLM on' : 'LLM off';
+        const db = d.database_configured ? 'DB connected' : 'DB missing';
+        const ts = d.latest_ts?.SPX || d.latest_ts?.[Object.keys(d.latest_ts || {})[0]] || '—';
+        statusEl.textContent = `${db} · ${llm} · latest ${ts}`;
+        if (!d.llm_configured) {
+          warnEl.textContent = 'OPENAI_API_KEY is not set — agent cannot reply until you add it in Railway variables.';
+        } else if (!d.database_configured) {
+          warnEl.textContent = 'DATABASE_URL is not set — dashboard and agent need Postgres snapshot data.';
+        } else {
+          warnEl.textContent = '';
+        }
+        (d.supported_tickers || ['SPX']).forEach(t => {
+          if ([...tickerEl.options].some(o => o.value === t)) return;
+          const o = document.createElement('option');
+          o.value = t; o.textContent = t;
+          tickerEl.appendChild(o);
+        });
+      } catch (_) {
+        statusEl.textContent = 'Health check failed';
+      }
+    }
+
+    async function loadPrompts() {
+      try {
+        const d = await fetchJson('/llm/prompts');
+        (d.suggested_prompts || []).forEach(p => {
+          const b = document.createElement('button');
+          b.className = 'prompt-btn';
+          b.textContent = p;
+          b.onclick = () => { inputEl.value = p; inputEl.focus(); };
+          promptsEl.appendChild(b);
+        });
+      } catch (_) {}
+    }
+
+    async function send() {
+      const text = inputEl.value.trim();
+      if (!text) return;
+      errorEl.textContent = '';
+      inputEl.value = '';
+      sendBtn.disabled = true;
+      chatHistory.push({ role: 'user', content: text });
+      addMessage('user', text);
+      setThinking(true);
+
+      const key = apiKeyEl.value.trim();
+      if (key) localStorage.setItem('gex_api_key', key);
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), CHAT_TIMEOUT_MS);
+      const useStream = streamEl.checked && modeEl.value === 'fast';
+      let assistantDiv = null;
+
+      try {
+        if (!tickerEl.value) throw new Error('No ticker selected');
+        if (useStream) {
+          assistantDiv = addMessage('assistant', '', null, false);
+          const textNode = assistantDiv.firstChild;
+          let full = '';
+          const r = await fetch(`/llm/chat/${tickerEl.value}`, {
+            method: 'POST',
+            headers: headers(),
+            signal: controller.signal,
+            body: JSON.stringify({
+              messages: chatHistory,
+              refresh_context: chatHistory.length <= 2,
+              mode: modeEl.value,
+              session_id: sessionId,
+              stream: true,
+            }),
+          });
+          setThinking(false);
+          if (!r.ok) throw new Error(await parseErrorResponse(r));
+          if (!r.body) throw new Error('Streaming not supported — disable Stream and retry');
+          const reader = r.body.getReader();
+          const decoder = new TextDecoder();
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            full += decoder.decode(value, { stream: true });
+            textNode.textContent = full.trimStart();
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+          }
+          if (!full.trim()) throw new Error('Empty response — try again without streaming');
+          lastReply = full.trim();
+          chatHistory.push({ role: 'assistant', content: lastReply });
+          const metaEl = document.createElement('div');
+          metaEl.className = 'msg-meta';
+          metaEl.innerHTML = modeEl.value + ' · stream';
+          assistantDiv.appendChild(metaEl);
+          const fb = document.createElement('div');
+          fb.className = 'feedback';
+          fb.innerHTML = '<button>👍</button><button>👎</button>';
+          fb.children[0].onclick = () => sendFeedback(1);
+          fb.children[1].onclick = () => sendFeedback(-1);
+          assistantDiv.appendChild(fb);
+        } else {
+          const r = await fetch(`/llm/chat/${tickerEl.value}`, {
+            method: 'POST',
+            headers: headers(),
+            signal: controller.signal,
+            body: JSON.stringify({
+              messages: chatHistory,
+              refresh_context: chatHistory.length <= 2,
+              mode: modeEl.value,
+              session_id: sessionId,
+              stream: false,
+            }),
+          });
+          setThinking(false);
+          if (!r.ok) throw new Error(await parseErrorResponse(r));
+          const d = await r.json();
+          const reply = d.reply || 'No response.';
+          lastReply = reply;
+          lastSnapshotTs = d.context_summary?.snapshot_ts || null;
+          chatHistory.push({ role: 'assistant', content: reply });
+          addMessage('assistant', reply, formatMeta(d), true);
+        }
+      } catch (e) {
+        const msg = e.name === 'AbortError'
+          ? 'Request timed out after 2 minutes — try Fast mode without Deep or streaming.'
+          : (e.message || 'Request failed');
+        errorEl.textContent = msg;
+        if (assistantDiv) assistantDiv.remove();
+        addMessage('assistant', 'Sorry — ' + msg);
+        chatHistory.pop();
+      } finally {
+        clearTimeout(timer);
+        setThinking(false);
+        sendBtn.disabled = false;
+        inputEl.focus();
+      }
+    }
+
+    function scheduleDashboard() {
+      if (dashTimer) clearInterval(dashTimer);
+      dashTimer = setInterval(loadDashboard, REFRESH_MS);
+    }
+
+    tickerEl.addEventListener('change', () => {
+      loadDashboard();
+      chatHistory = [];
+      messagesEl.innerHTML = '';
+      addMessage('assistant', `Switched to ${tickerEl.value}. I've got live snapshot data loaded — ask me about regime, flip, walls, or forecasts.`);
+    });
+
+    sendBtn.onclick = send;
+    inputEl.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+    });
+    apiKeyEl.value = localStorage.getItem('gex_api_key') || '';
+
+    loadHealth();
+    loadPrompts();
+    loadDashboard();
+    scheduleDashboard();
+    addMessage('assistant', "Hey — I'm your GEX desk analyst. The dashboard above refreshes every minute. Ask me anything about regime, flip, walls, or where spot might head.");
+  </script>
+</body>
+</html>

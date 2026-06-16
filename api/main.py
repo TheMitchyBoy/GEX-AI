@@ -43,19 +43,15 @@ app.add_middleware(
 )
 
 
-@app.get("/")
-def root():
-    from fastapi.responses import JSONResponse
-
-    return JSONResponse(
-        {
-            "status": "ok",
-            "service": "gex-ai-api",
-            "agent_ui": "/agent",
-            "docs": "/docs",
-            "health": "/health",
-        }
-    )
+@app.get("/api")
+def api_root():
+    return {
+        "status": "ok",
+        "service": "gex-ai-api",
+        "home": "/",
+        "docs": "/docs",
+        "health": "/health",
+    }
 
 
 @app.get("/health")

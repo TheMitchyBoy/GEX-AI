@@ -10,7 +10,8 @@ Standalone read-only analytics and prediction app for gamma exposure (GEX) data 
 - **Forecasts** — next-snapshot ΔGEX, total GEX, regime, gamma flip, spot bias, confidence interval
 - **Similar setups** — nearest historical analogs
 - **Walk-forward backtest** — MAE on ΔGEX, regime accuracy, spot bias hit rate, interval coverage
-- **Streamlit dashboard** — live regime, forecast card, intraday charts, strike heatmap
+- **Web hub (`/`)** — live GEX dashboard (metrics, intraday & strike charts) plus embedded agent chat
+- **Streamlit dashboard** — optional separate deploy with extended analytics tabs
 - **FastAPI** — `/forecast`, `/history`, `/similar`, `/backtest`, `/strikes`, `/llm/*`
 - **Gradient boosting overlay** — optional sklearn GBM blend with KNN (`scripts/train_model.py`)
 - **Online learning (River)** — incremental ΔGEX model from [online-ml/river](https://github.com/online-ml/river); learns each new snapshot in the forecast poller
@@ -71,6 +72,8 @@ Endpoints:
 
 | Method | Path | Description |
 |--------|------|-------------|
+| GET | `/` | GEX hub — dashboard + agent chat |
+| GET | `/api` | JSON service metadata |
 | GET | `/health` | App + DB row counts |
 | GET | `/forecast/{ticker}` | Next-snapshot forecast |
 | GET | `/history/{ticker}` | Snapshot timeline |
@@ -126,10 +129,12 @@ streamlit run dashboard/app.py
 Open in your browser on the same Railway URL as the API:
 
 ```
-https://<your-railway-url>/agent
+https://<your-railway-url>/
 ```
 
-The chat UI is built into the API — no Streamlit or second deploy needed. Set `OPENAI_API_KEY` and `DATABASE_URL` in Railway variables.
+The home page includes a **live dashboard** (spot, GEX, regime, flip, forecast charts) and the **conversational agent** below it. `/agent` redirects to `/`. Chat-only legacy UI: `/agent/legacy`.
+
+Set `OPENAI_API_KEY` and `DATABASE_URL` in Railway variables.
 
 Optional Streamlit version (separate service): `./scripts/start_agent.sh`
 

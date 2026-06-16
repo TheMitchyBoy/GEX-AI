@@ -7,8 +7,22 @@ from api.main import app
 client = TestClient(app)
 
 
-def test_agent_page_served():
-    r = client.get("/agent")
+def test_home_page_served():
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "GEX Hub" in r.text
+    assert "Live Dashboard" in r.text
+    assert "Market Agent" in r.text
+
+
+def test_agent_redirects_home():
+    r = client.get("/agent", follow_redirects=False)
+    assert r.status_code == 302
+    assert r.headers["location"] == "/"
+
+
+def test_agent_legacy_page():
+    r = client.get("/agent/legacy")
     assert r.status_code == 200
     assert "GEX Market Agent" in r.text
 
@@ -16,13 +30,14 @@ def test_agent_page_served():
 def test_chat_redirect():
     r = client.get("/chat", follow_redirects=False)
     assert r.status_code == 302
-    assert r.headers["location"] == "/agent"
+    assert r.headers["location"] == "/"
 
 
-def test_root_links_agent():
-    r = client.get("/")
+def test_api_root():
+    r = client.get("/api")
     assert r.status_code == 200
-    assert r.json()["agent_ui"] == "/agent"
+    assert r.json()["home"] == "/"
+    assert r.json()["health"] == "/health"
 
 
 def test_chat_without_database_url():
