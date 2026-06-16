@@ -26,7 +26,7 @@ def record_metric(name: str, value: float = 1.0) -> None:
 
 class SecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        if request.url.path in ("/health", "/docs", "/openapi.json", "/redoc"):
+        if request.url.path in ("/", "/health", "/docs", "/openapi.json", "/redoc"):
             return await call_next(request)
 
         if config.API_KEY:

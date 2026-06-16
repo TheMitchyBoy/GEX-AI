@@ -1,4 +1,4 @@
-web: uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000}
-dashboard: streamlit run dashboard/app.py --server.port ${PORT:-8501} --server.address 0.0.0.0
-agent: streamlit run dashboard/agent.py --server.port ${PORT:-8502} --server.address 0.0.0.0
+web: ./scripts/start_web.sh
+dashboard: ./scripts/start_dashboard.sh
+agent: ./scripts/start_agent.sh
 worker: python jobs/forecast_poll.py

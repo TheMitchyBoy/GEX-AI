@@ -37,10 +37,33 @@ cp .env.example .env
 python scripts/explore_db.py
 ```
 
-### Run API
+### Deploy on Railway
+
+**API service (recommended for web):**
+
+1. Create a Railway service from this repo
+2. Set `DATABASE_URL` (and optional `OPENAI_API_KEY`)
+3. Leave the start command as `./scripts/start_web.sh` (default in `railway.toml` / `Dockerfile`)
+4. Railway sets `PORT` automatically — do **not** hardcode port 8000
+
+**Streamlit dashboards** — use a separate Railway service with a custom start command:
+
+| UI | Start command |
+|----|----------------|
+| Analytics | `./scripts/start_dashboard.sh` |
+| LLM Agent | `./scripts/start_agent.sh` |
+| Forecast poller | `python jobs/forecast_poll.py` |
+
+Health check path: `/health` (or `/`)
+
+If you see **502 Bad Gateway**, the process is not listening on `$PORT`. Check deploy logs and confirm the start command uses `./scripts/start_web.sh`, not a hardcoded port.
+
+### Run API (local)
 
 ```bash
 uvicorn api.main:app --host 0.0.0.0 --port 8000
+# or
+./scripts/start_web.sh
 ```
 
 Endpoints:

@@ -41,6 +41,11 @@ app.add_middleware(
 )
 
 
+@app.get("/")
+def root() -> dict[str, str]:
+    return {"status": "ok", "service": "gex-ai-api"}
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
     payload: dict[str, Any] = {
