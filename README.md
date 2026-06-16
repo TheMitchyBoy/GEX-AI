@@ -56,7 +56,8 @@ Endpoints:
 | GET | `/llm/status` | LLM configuration status |
 | GET | `/llm/forecast/{ticker}` | LLM-enhanced next-snapshot forecast |
 | POST | `/llm/forecast/{ticker}` | LLM forecast with optional extra instructions |
-| GET | `/llm/predictions/{ticker}` | Logged predictions from `llm_predictions` |
+| POST | `/llm/chat/{ticker}` | Conversational GEX agent (multi-turn) |
+| GET | `/llm/prompts` | Suggested agent starter questions |
 
 ### LLM forecast
 
@@ -91,6 +92,24 @@ Or let the forecast poller call `ensure_extensions()` on startup.
 
 ```bash
 streamlit run dashboard/app.py
+```
+
+### GEX Agent chat dashboard
+
+Interactive LLM chat grounded in live GEX context:
+
+```bash
+streamlit run dashboard/agent.py
+```
+
+Or via Procfile: `agent` process on port 8502.
+
+API chat endpoint:
+
+```bash
+curl -X POST http://localhost:8000/llm/chat/SPX \
+  -H 'Content-Type: application/json' \
+  -d '{"messages":[{"role":"user","content":"What is the current gamma regime?"}]}'
 ```
 
 ### Forecast poller

@@ -13,8 +13,20 @@ from db.loader import load_snapshot_history
 from db.queries import fetch_llm_predictions
 from models.llm_client import is_llm_configured
 from models.llm_predict import generate_llm_forecast
+from models.llm_agent import SUGGESTED_PROMPTS, chat_with_agent
 
 router = APIRouter(prefix="/llm", tags=["llm"])
+
+
+class ChatMessage(BaseModel):
+    role: str = Field(pattern="^(user|assistant)$")
+    content: str = Field(min_length=1, max_length=8000)
+
+
+class AgentChatRequest(BaseModel):
+    messages: list[ChatMessage] = Field(min_length=1, max_length=50)
+    lookback_days: int = Field(default=config.LOOKBACK_DAYS, ge=1, le=365)
+    refresh_context: bool = True
 
 
 class LLMForecastRequest(BaseModel):
@@ -92,3 +104,37 @@ def llm_predictions(
             unresolved_only=unresolved_only,
         )
     return {"ticker": ticker.upper(), "count": len(rows), "predictions": rows}
+
+
+@router.get("/prompts")
+def agent_prompts() -> dict[str, Any]:
+    return {"suggested_prompts": SUGGESTED_PROMPTS}
+
+
+@router.post("/chat/{ticker}")
+def agent_chat(ticker: str, body: AgentChatRequest) -> dict[str, Any]:
+    require_database_url()
+    history = load_snapshot_history(ticker.upper(), lookback_days=body.lookback_days)
+    if len(history) < config.MIN_KNN_SNAPSHOTS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Insufficient data: need at least {config.MIN_KNN_SNAPSHOTS} snapshots",
+        )
+    messages = [{"role": m.role, "content": m.content} for m in body.messages]
+    result = chat_with_agent(
+        history,
+        messages,
+        lookback_days=body.lookback_days,
+        refresh_context=body.refresh_context,
+    )
+    if result.get("error") and not result.get("reply"):
+        raise HTTPException(status_code=503, detail=result["error"])
+    return {
+        "ticker": ticker.upper(),
+        "reply": result.get("reply"),
+        "model": result.get("model"),
+        "context_summary": {
+            "snapshot_ts": (result.get("context") or {}).get("bundle", {}).get("snapshot_ts"),
+            "estimated_tokens": (result.get("context") or {}).get("estimated_tokens"),
+        },
+    }

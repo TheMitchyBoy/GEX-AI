@@ -37,6 +37,41 @@ def _classify_llm_error(exc: Exception) -> str:
     return "LLM request failed — see server logs for details"
 
 
+def openai_chat(
+    system: str,
+    messages: list[dict[str, str]],
+    *,
+    max_tokens: int | None = None,
+    temperature: float | None = None,
+    json_mode: bool = False,
+) -> tuple[str | None, str | None]:
+    """Multi-turn chat. messages: [{role, content}, ...] excluding system."""
+    cfg = resolve_openai_config()
+    if not cfg:
+        return None, "OPENAI_API_KEY is not configured"
+    api_key, model = cfg
+    try:
+        import openai
+
+        client = openai.OpenAI(api_key=api_key)
+        payload: list[dict[str, str]] = [{"role": "system", "content": system}]
+        payload.extend(messages)
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "messages": payload,
+            "max_tokens": max_tokens if max_tokens is not None else config.LLM_MAX_TOKENS,
+            "temperature": temperature if temperature is not None else config.LLM_TEMPERATURE,
+        }
+        if json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+        resp = client.chat.completions.create(**kwargs)
+        content = resp.choices[0].message.content
+        return (content.strip() if content else None), None
+    except Exception as exc:
+        logger.warning("OpenAI chat failed: %s", exc)
+        return None, _classify_llm_error(exc)
+
+
 def openai_chat_json(
     system: str,
     user_message: str,
@@ -50,24 +85,19 @@ def openai_chat_json(
         return None, "OPENAI_API_KEY is not configured"
     api_key, model = cfg
     try:
-        import openai
-
-        client = openai.OpenAI(api_key=api_key)
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user_message},
-            ],
-            response_format={"type": "json_object"},
-            max_tokens=max_tokens if max_tokens is not None else config.LLM_MAX_TOKENS,
-            temperature=temperature if temperature is not None else config.LLM_TEMPERATURE,
+        parsed, err = openai_chat(
+            system,
+            [{"role": "user", "content": user_message}],
+            max_tokens=max_tokens,
+            temperature=temperature,
+            json_mode=True,
         )
-        raw = resp.choices[0].message.content
-        parsed = parse_prediction_json(raw)
-        if parsed is None:
+        if err:
+            return None, err
+        parsed_dict = parse_prediction_json(parsed)
+        if parsed_dict is None:
             return None, "LLM returned invalid JSON"
-        return parsed, None
+        return parsed_dict, None
     except Exception as exc:
         logger.warning("OpenAI chat failed: %s", exc)
         return None, _classify_llm_error(exc)
