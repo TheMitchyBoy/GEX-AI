@@ -72,6 +72,74 @@ def openai_chat(
         return None, _classify_llm_error(exc)
 
 
+def openai_chat_with_tools(
+    system: str,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    tool_executor: Any,
+    *,
+    max_rounds: int | None = None,
+    max_tokens: int | None = None,
+    temperature: float | None = None,
+) -> tuple[str | None, str | None, list[dict[str, Any]]]:
+    """Run tool-calling loop; tool_executor(name, arguments_str) -> str."""
+    cfg = resolve_openai_config()
+    if not cfg:
+        return None, "OPENAI_API_KEY is not configured", []
+    api_key, model = cfg
+    max_rounds = max_rounds if max_rounds is not None else config.LLM_MAX_TOOL_ROUNDS
+    tool_log: list[dict[str, Any]] = []
+
+    try:
+        import openai
+
+        client = openai.OpenAI(api_key=api_key)
+        payload: list[dict[str, Any]] = [{"role": "system", "content": system}]
+        payload.extend(messages)
+
+        for _ in range(max_rounds + 1):
+            kwargs: dict[str, Any] = {
+                "model": model,
+                "messages": payload,
+                "max_tokens": max_tokens if max_tokens is not None else config.LLM_MAX_TOKENS,
+                "temperature": temperature if temperature is not None else config.LLM_TEMPERATURE,
+            }
+            if tools:
+                kwargs["tools"] = tools
+                kwargs["tool_choice"] = "auto"
+
+            resp = client.chat.completions.create(**kwargs)
+            msg = resp.choices[0].message
+
+            if not msg.tool_calls:
+                content = (msg.content or "").strip()
+                return content or None, None, tool_log
+
+            payload.append(
+                {
+                    "role": "assistant",
+                    "content": msg.content,
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+                        }
+                        for tc in msg.tool_calls
+                    ],
+                }
+            )
+            for tc in msg.tool_calls:
+                result = tool_executor(tc.function.name, tc.function.arguments)
+                tool_log.append({"tool": tc.function.name, "arguments": tc.function.arguments, "result_preview": result[:500]})
+                payload.append({"role": "tool", "tool_call_id": tc.id, "content": result})
+
+        return None, "Tool loop exceeded max rounds", tool_log
+    except Exception as exc:
+        logger.warning("OpenAI tool chat failed: %s", exc)
+        return None, _classify_llm_error(exc), tool_log
+
+
 def openai_chat_json(
     system: str,
     user_message: str,

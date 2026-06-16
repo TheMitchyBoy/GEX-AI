@@ -27,6 +27,8 @@ class AgentChatRequest(BaseModel):
     messages: list[ChatMessage] = Field(min_length=1, max_length=50)
     lookback_days: int = Field(default=config.LOOKBACK_DAYS, ge=1, le=365)
     refresh_context: bool = True
+    use_tools: bool | None = None
+    two_pass: bool | None = None
 
 
 class LLMForecastRequest(BaseModel):
@@ -40,9 +42,15 @@ def llm_status() -> dict[str, Any]:
     return {
         "llm_configured": is_llm_configured(),
         "model": config.LLM_MODEL if is_llm_configured() else None,
+        "temperature": config.LLM_TEMPERATURE,
+        "max_tokens": config.LLM_MAX_TOKENS,
         "write_predictions": config.WRITE_PREDICTIONS,
         "prediction_source": config.LLM_PREDICTION_SOURCE,
         "cache_enabled": config.LLM_CACHE_ENABLED,
+        "two_pass": config.LLM_TWO_PASS,
+        "use_tools": config.LLM_USE_TOOLS,
+        "rich_context": config.LLM_RICH_CONTEXT,
+        "max_tool_rounds": config.LLM_MAX_TOOL_ROUNDS,
     }
 
 
@@ -126,6 +134,8 @@ def agent_chat(ticker: str, body: AgentChatRequest) -> dict[str, Any]:
         messages,
         lookback_days=body.lookback_days,
         refresh_context=body.refresh_context,
+        use_tools=body.use_tools,
+        two_pass=body.two_pass,
     )
     if result.get("error") and not result.get("reply"):
         raise HTTPException(status_code=503, detail=result["error"])
@@ -133,8 +143,35 @@ def agent_chat(ticker: str, body: AgentChatRequest) -> dict[str, Any]:
         "ticker": ticker.upper(),
         "reply": result.get("reply"),
         "model": result.get("model"),
+        "two_pass": result.get("two_pass"),
+        "tools_used": result.get("tools_used") or [],
+        "intelligence": result.get("intelligence"),
+        "from_cache": result.get("from_cache", False),
         "context_summary": {
             "snapshot_ts": (result.get("context") or {}).get("bundle", {}).get("snapshot_ts"),
             "estimated_tokens": (result.get("context") or {}).get("estimated_tokens"),
         },
     }
+
+
+@router.get("/eval/{ticker}")
+def agent_eval(
+    ticker: str,
+    lookback_days: int = Query(default=30, ge=1, le=365),
+) -> dict[str, Any]:
+    """Run grounding evaluation probes (requires OpenAI + DB)."""
+    if not is_llm_configured():
+        raise HTTPException(status_code=503, detail="OPENAI_API_KEY not configured")
+    require_database_url()
+    from models.llm_eval import evaluate_agent_grounding
+
+    history = load_snapshot_history(ticker.upper(), lookback_days=lookback_days)
+    if len(history) < config.MIN_KNN_SNAPSHOTS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Insufficient data: need at least {config.MIN_KNN_SNAPSHOTS} snapshots",
+        )
+    try:
+        return evaluate_agent_grounding(history, lookback_days=lookback_days)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc

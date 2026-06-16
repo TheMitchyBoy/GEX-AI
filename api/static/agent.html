@@ -95,6 +95,14 @@
     }
     .msg.user { align-self: flex-end; background: var(--user); }
     .msg.assistant { align-self: flex-start; background: var(--bot); border: 1px solid var(--border); }
+    .msg-meta { font-size: 0.72rem; color: var(--muted); margin-top: 0.35rem; }
+    .msg-meta .tag {
+      display: inline-block;
+      background: var(--panel);
+      padding: 0.1rem 0.4rem;
+      border-radius: 4px;
+      margin-right: 0.35rem;
+    }
     .composer {
       border-top: 1px solid var(--border);
       padding: 1rem 1.25rem;
@@ -174,12 +182,30 @@
       return h;
     }
 
-    function addMessage(role, content) {
+    function addMessage(role, content, meta) {
       const div = document.createElement('div');
       div.className = 'msg ' + role;
       div.textContent = content;
+      if (meta && role === 'assistant') {
+        const metaEl = document.createElement('div');
+        metaEl.className = 'msg-meta';
+        metaEl.innerHTML = meta;
+        div.appendChild(metaEl);
+      }
       messagesEl.appendChild(div);
       messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    function formatMeta(d) {
+      const tags = [];
+      if (d.from_cache) tags.push('<span class="tag">cached</span>');
+      if (d.two_pass) tags.push('<span class="tag">two-pass</span>');
+      if (d.tools_used && d.tools_used.length) {
+        tags.push('<span class="tag">tools: ' + d.tools_used.join(', ') + '</span>');
+      }
+      if (d.intelligence?.rich_context) tags.push('<span class="tag">rich context</span>');
+      const parts = [d.model, ...tags].filter(Boolean);
+      return parts.length ? parts.join(' · ') : '';
     }
 
     async function loadHealth() {
@@ -236,9 +262,10 @@
         if (!r.ok) throw new Error(d.detail || 'Request failed');
         const reply = d.reply || 'No response.';
         history.push({ role: 'assistant', content: reply });
-        addMessage('assistant', reply);
+        addMessage('assistant', reply, formatMeta(d));
         if (d.context_summary?.snapshot_ts) {
-          statusEl.textContent += ` · ctx ${d.context_summary.snapshot_ts}`;
+          const base = statusEl.textContent.split(' · ctx ')[0];
+          statusEl.textContent = `${base} · ctx ${d.context_summary.snapshot_ts}`;
         }
       } catch (e) {
         errorEl.textContent = e.message;

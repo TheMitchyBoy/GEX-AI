@@ -81,6 +81,7 @@ Endpoints:
 | POST | `/llm/forecast/{ticker}` | LLM forecast with optional extra instructions |
 | POST | `/llm/chat/{ticker}` | Conversational GEX agent (multi-turn) |
 | GET | `/llm/prompts` | Suggested agent starter questions |
+| GET | `/llm/eval/{ticker}` | Grounding evaluation probes |
 
 ### LLM forecast
 
@@ -132,7 +133,26 @@ Optional Streamlit version (separate service): `./scripts/start_agent.sh`
 ```bash
 curl -X POST http://localhost:8000/llm/chat/SPX \
   -H 'Content-Type: application/json' \
-  -d '{"messages":[{"role":"user","content":"What is the current gamma regime?"}]}'
+  -d '{"messages":[{"role":"user","content":"What is the current gamma regime?"}],"use_tools":true,"two_pass":true}'
+```
+
+### AI intelligence features
+
+The agent uses a multi-layer pipeline (all toggleable via env vars):
+
+| Feature | Env | Description |
+|---------|-----|-------------|
+| Rich context | `LLM_RICH_CONTEXT=1` | ATM strike band, cumulative GEX, quant synthesis, session analogs, forecast track record |
+| Two-pass reasoning | `LLM_TWO_PASS=1` | Structured fact extraction pass before final answer |
+| Tool calling | `LLM_USE_TOOLS=1` | OpenAI function calls: forecast, similar setups, strikes, backtest, KNN vs LLM |
+| Session RAG | (always in rich mode) | Similar trading days grouped by `market_date` |
+| Calibration feedback | (always in rich mode) | Resolved `llm_predictions` outcomes injected into context |
+
+Evaluate grounding probes:
+
+```bash
+python scripts/eval_agent.py --ticker SPX
+# or GET /llm/eval/SPX
 ```
 
 ### Forecast poller
@@ -165,9 +185,14 @@ pytest -q
 | `PROCESSOR_HEALTH_URL` | — | Optional upstream `GET /health/live` |
 | `WRITE_PREDICTIONS` | `0` | Insert forecasts into `llm_predictions` |
 | `OPENAI_API_KEY` | — | OpenAI API key for LLM forecasts |
-| `LLM_MODEL` | `gpt-4o-mini` | OpenAI chat model |
-| `LLM_MAX_TOKENS` | `1200` | Max tokens per LLM response |
-| `LLM_TEMPERATURE` | `0.35` | LLM sampling temperature |
+| `LLM_MODEL` | `gpt-4o` | OpenAI chat model |
+| `LLM_MAX_TOKENS` | `2000` | Max tokens per LLM response |
+| `LLM_TEMPERATURE` | `0.25` | LLM sampling temperature |
+| `LLM_TWO_PASS` | `1` | Two-pass fact extraction before answer |
+| `LLM_USE_TOOLS` | `1` | Enable OpenAI tool-calling loop |
+| `LLM_RICH_CONTEXT` | `1` | Inject ATM band, RAG sessions, track record |
+| `LLM_MAX_TOOL_ROUNDS` | `2` | Max tool-calling iterations per chat |
+| `LLM_CACHE_ENABLED` | `1` | Cache agent replies per ticker+snapshot |
 | `LLM_PREDICTION_SOURCE` | `gex-ai-llm` | `source` column when logging LLM forecasts |
 
 ## Database schema
