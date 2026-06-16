@@ -139,6 +139,14 @@ def calibration(ticker: str, source: str | None = None) -> dict[str, Any]:
     return {"ticker": ticker.upper(), **stats}
 
 
+@app.get("/online/{ticker}")
+def online_learning_status(ticker: str) -> dict[str, Any]:
+    """River online learner status (https://github.com/online-ml/river)."""
+    from models.online_learn import model_status
+
+    return {"ticker": ticker.upper(), **model_status(ticker.upper())}
+
+
 @app.get("/insights/{ticker}")
 def daily_insights(ticker: str, market_date: str | None = None, limit: int = 10) -> dict[str, Any]:
     require_database_url()

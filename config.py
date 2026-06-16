@@ -46,6 +46,10 @@ RUN_LLM_ON_POLL = os.environ.get("RUN_LLM_ON_POLL", "1") in ("1", "true", "True"
 MATERIALIZE_FEATURES = os.environ.get("MATERIALIZE_FEATURES", "0") in ("1", "true", "True")
 
 GBOOST_BLEND_WEIGHT = float(os.environ.get("GBOOST_BLEND_WEIGHT", "0.3"))
+ONLINE_LEARNING_ENABLED = os.environ.get("ONLINE_LEARNING_ENABLED", "1") in ("1", "true", "True")
+ONLINE_BLEND_WEIGHT = float(os.environ.get("ONLINE_BLEND_WEIGHT", "0.15"))
+ONLINE_AUTO_BOOTSTRAP = os.environ.get("ONLINE_AUTO_BOOTSTRAP", "1") in ("1", "true", "True")
+ONLINE_MIN_UPDATES = int(os.environ.get("ONLINE_MIN_UPDATES", "20"))
 MODELS_DIR = Path(os.environ.get("MODELS_DIR", str(Path(__file__).resolve().parent / "artifacts" / "models")))
 MULTI_HORIZONS = tuple(int(x) for x in os.environ.get("MULTI_HORIZONS", "1,3,6").split(",") if x.strip())
 

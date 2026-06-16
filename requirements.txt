@@ -10,4 +10,5 @@ httpx>=0.27,<1
 openai>=1.30,<2
 scikit-learn>=1.4,<2
 joblib>=1.3,<2
+river>=0.21,<1
 pytest>=8.0,<9

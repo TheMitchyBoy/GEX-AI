@@ -53,6 +53,18 @@ def run_once(ticker: str | None = None) -> dict[str, Any] | None:
 
     reconcile_predictions(ticker)
     history = load_snapshot_history(ticker, lookback_days=config.LOOKBACK_DAYS)
+
+    if config.ONLINE_LEARNING_ENABLED and history:
+        try:
+            from models.online_learn import ensure_bootstrapped, maybe_learn_latest
+
+            ensure_bootstrapped(history, ticker)
+            learned = maybe_learn_latest(history, ticker)
+            if learned:
+                logger.info("Online model learned from latest snapshot pair for %s", ticker)
+        except Exception:
+            logger.debug("Online learning step skipped", exc_info=True)
+
     if config.MATERIALIZE_FEATURES and history:
         try:
             materialize_features_for_history(history[-50:])

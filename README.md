@@ -13,6 +13,7 @@ Standalone read-only analytics and prediction app for gamma exposure (GEX) data 
 - **Streamlit dashboard** — live regime, forecast card, intraday charts, strike heatmap
 - **FastAPI** — `/forecast`, `/history`, `/similar`, `/backtest`, `/strikes`, `/llm/*`
 - **Gradient boosting overlay** — optional sklearn GBM blend with KNN (`scripts/train_model.py`)
+- **Online learning (River)** — incremental ΔGEX model from [online-ml/river](https://github.com/online-ml/river); learns each new snapshot in the forecast poller
 - **Multi-horizon forecasts** — h1/h3/h6 snapshot horizons on `/forecast`
 - **Prediction reconciliation** — resolves `llm_predictions` against next snapshot
 - **LLM cache** — avoids re-calling OpenAI on dashboard refresh
@@ -76,6 +77,7 @@ Endpoints:
 | GET | `/similar/{ticker}` | Historical analogs |
 | GET | `/strikes/{ticker}?ts=` | Strike profile |
 | GET | `/backtest/{ticker}` | Walk-forward metrics |
+| GET | `/online/{ticker}` | River online learner status |
 | GET | `/llm/status` | LLM configuration status |
 | GET | `/llm/forecast/{ticker}` | LLM-enhanced next-snapshot forecast |
 | POST | `/llm/forecast/{ticker}` | LLM forecast with optional extra instructions |
@@ -162,6 +164,18 @@ python scripts/eval_agent.py --ticker SPX
 python jobs/forecast_poll.py
 ```
 
+### Train models
+
+```bash
+# Batch GBoost overlay
+python scripts/train_model.py --ticker SPX --gboost
+
+# Bootstrap River online learner from history
+python scripts/train_model.py --ticker SPX --online
+```
+
+The forecast poller (`jobs/forecast_poll.py`) automatically bootstraps and updates the River model on each new snapshot when `ONLINE_LEARNING_ENABLED=1`.
+
 ### Backtest CLI
 
 ```bash
@@ -194,6 +208,10 @@ pytest -q
 | `LLM_MAX_TOOL_ROUNDS` | `2` | Max tool-calling iterations per chat |
 | `LLM_CACHE_ENABLED` | `1` | Cache agent replies per ticker+snapshot |
 | `LLM_PREDICTION_SOURCE` | `gex-ai-llm` | `source` column when logging LLM forecasts |
+| `ONLINE_LEARNING_ENABLED` | `1` | River incremental learner ([online-ml/river](https://github.com/online-ml/river)) |
+| `ONLINE_BLEND_WEIGHT` | `0.15` | Blend weight for online ΔGEX forecast |
+| `ONLINE_AUTO_BOOTSTRAP` | `1` | Warm-start online model from DB on first run |
+| `ONLINE_MIN_UPDATES` | `20` | Min snapshot pairs before online blend activates |
 
 ## Database schema
 
