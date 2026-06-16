@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GEX Market Agent</title>
+  <style>
+    :root {
+      --bg: #0b1220;
+      --panel: #111827;
+      --border: #1f2937;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --accent: #3b82f6;
+      --user: #1e3a5f;
+      --bot: #14201a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      background: var(--panel);
+    }
+    header h1 { margin: 0; font-size: 1.15rem; font-weight: 600; }
+    header .status { font-size: 0.8rem; color: var(--muted); }
+    .layout {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      min-height: 0;
+    }
+    aside {
+      border-right: 1px solid var(--border);
+      padding: 1rem;
+      overflow-y: auto;
+      background: #0d1526;
+    }
+    aside label { font-size: 0.75rem; color: var(--muted); display: block; margin-bottom: 0.35rem; }
+    aside select, aside input {
+      width: 100%;
+      margin-bottom: 0.75rem;
+      padding: 0.5rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+    }
+    .prompt-btn {
+      display: block;
+      width: 100%;
+      text-align: left;
+      margin-bottom: 0.5rem;
+      padding: 0.55rem 0.65rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+      font-size: 0.78rem;
+      cursor: pointer;
+    }
+    .prompt-btn:hover { border-color: var(--accent); }
+    main {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    #messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1rem 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    .msg {
+      max-width: 85%;
+      padding: 0.75rem 1rem;
+      border-radius: 12px;
+      line-height: 1.5;
+      font-size: 0.92rem;
+      white-space: pre-wrap;
+    }
+    .msg.user { align-self: flex-end; background: var(--user); }
+    .msg.assistant { align-self: flex-start; background: var(--bot); border: 1px solid var(--border); }
+    .composer {
+      border-top: 1px solid var(--border);
+      padding: 1rem 1.25rem;
+      display: flex;
+      gap: 0.5rem;
+      background: var(--panel);
+    }
+    #input {
+      flex: 1;
+      padding: 0.75rem 1rem;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      resize: none;
+      min-height: 48px;
+      max-height: 120px;
+    }
+    button.send {
+      padding: 0 1.25rem;
+      border: none;
+      border-radius: 10px;
+      background: var(--accent);
+      color: white;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button.send:disabled { opacity: 0.5; cursor: not-allowed; }
+    .error { color: #f87171; font-size: 0.85rem; padding: 0 1.25rem 0.5rem; }
+    @media (max-width: 768px) {
+      .layout { grid-template-columns: 1fr; }
+      aside { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>GEX Market Agent</h1>
+      <div class="status" id="status">Connecting…</div>
+    </div>
+  </header>
+  <div class="layout">
+    <aside>
+      <label for="ticker">Ticker</label>
+      <select id="ticker"></select>
+      <label for="apiKey">API key (if required)</label>
+      <input id="apiKey" type="password" placeholder="X-API-Key (optional)" />
+      <label>Suggested prompts</label>
+      <div id="prompts"></div>
+    </aside>
+    <main>
+      <div id="messages"></div>
+      <div class="error" id="error"></div>
+      <div class="composer">
+        <textarea id="input" rows="1" placeholder="Ask about regime, flip, walls, forecasts…"></textarea>
+        <button class="send" id="send">Send</button>
+      </div>
+    </main>
+  </div>
+  <script>
+    const messagesEl = document.getElementById('messages');
+    const inputEl = document.getElementById('input');
+    const sendBtn = document.getElementById('send');
+    const errorEl = document.getElementById('error');
+    const statusEl = document.getElementById('status');
+    const tickerEl = document.getElementById('ticker');
+    const apiKeyEl = document.getElementById('apiKey');
+    const promptsEl = document.getElementById('prompts');
+
+    let history = [];
+
+    function headers() {
+      const h = { 'Content-Type': 'application/json' };
+      const key = apiKeyEl.value.trim() || localStorage.getItem('gex_api_key');
+      if (key) h['X-API-Key'] = key;
+      return h;
+    }
+
+    function addMessage(role, content) {
+      const div = document.createElement('div');
+      div.className = 'msg ' + role;
+      div.textContent = content;
+      messagesEl.appendChild(div);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    async function loadHealth() {
+      try {
+        const r = await fetch('/health', { headers: headers() });
+        const d = await r.json();
+        const llm = d.llm_configured ? 'LLM on' : 'LLM off (set OPENAI_API_KEY)';
+        const db = d.database_configured ? 'DB connected' : 'DB missing';
+        const ts = d.latest_ts?.SPX || d.latest_ts?.[Object.keys(d.latest_ts||{})[0]] || '—';
+        statusEl.textContent = `${db} · ${llm} · latest ${ts}`;
+        (d.supported_tickers || ['SPX']).forEach(t => {
+          const o = document.createElement('option');
+          o.value = t; o.textContent = t;
+          tickerEl.appendChild(o);
+        });
+      } catch (e) {
+        statusEl.textContent = 'Health check failed';
+      }
+    }
+
+    async function loadPrompts() {
+      try {
+        const r = await fetch('/llm/prompts', { headers: headers() });
+        const d = await r.json();
+        (d.suggested_prompts || []).forEach(p => {
+          const b = document.createElement('button');
+          b.className = 'prompt-btn';
+          b.textContent = p;
+          b.onclick = () => { inputEl.value = p; inputEl.focus(); };
+          promptsEl.appendChild(b);
+        });
+      } catch (_) {}
+    }
+
+    async function send() {
+      const text = inputEl.value.trim();
+      if (!text) return;
+      errorEl.textContent = '';
+      inputEl.value = '';
+      sendBtn.disabled = true;
+      history.push({ role: 'user', content: text });
+      addMessage('user', text);
+
+      const key = apiKeyEl.value.trim();
+      if (key) localStorage.setItem('gex_api_key', key);
+
+      try {
+        const r = await fetch(`/llm/chat/${tickerEl.value}`, {
+          method: 'POST',
+          headers: headers(),
+          body: JSON.stringify({ messages: history, refresh_context: history.length <= 2 }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || 'Request failed');
+        const reply = d.reply || 'No response.';
+        history.push({ role: 'assistant', content: reply });
+        addMessage('assistant', reply);
+        if (d.context_summary?.snapshot_ts) {
+          statusEl.textContent += ` · ctx ${d.context_summary.snapshot_ts}`;
+        }
+      } catch (e) {
+        errorEl.textContent = e.message;
+        addMessage('assistant', 'Sorry — ' + e.message);
+        history.pop();
+      } finally {
+        sendBtn.disabled = false;
+        inputEl.focus();
+      }
+    }
+
+    sendBtn.onclick = send;
+    inputEl.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+    });
+    apiKeyEl.value = localStorage.getItem('gex_api_key') || '';
+
+    loadHealth();
+    loadPrompts();
+    addMessage('assistant', 'Hi — I analyze live GEX snapshots. Ask about regime, gamma flip, walls, or forecasts.');
+  </script>
+</body>
+</html>

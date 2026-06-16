@@ -117,17 +117,17 @@ Or let the forecast poller call `ensure_extensions()` on startup.
 streamlit run dashboard/app.py
 ```
 
-### GEX Agent chat dashboard
+### GEX Agent chat (no extra Railway service)
 
-Interactive LLM chat grounded in live GEX context:
+Open in your browser on the same Railway URL as the API:
 
-```bash
-streamlit run dashboard/agent.py
+```
+https://<your-railway-url>/agent
 ```
 
-Or via Procfile: `agent` process on port 8502.
+The chat UI is built into the API — no Streamlit or second deploy needed. Set `OPENAI_API_KEY` and `DATABASE_URL` in Railway variables.
 
-API chat endpoint:
+Optional Streamlit version (separate service): `./scripts/start_agent.sh`
 
 ```bash
 curl -X POST http://localhost:8000/llm/chat/SPX \

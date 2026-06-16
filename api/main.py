@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 import config
+from api.agent_ui import router as agent_ui_router
 from api.alerts import evaluate_alerts
 from api.llm_routes import router as llm_router
 from api.middleware import SecurityMiddleware, get_metrics
@@ -31,6 +32,7 @@ from models.multi_horizon import predict_multi_horizon
 from models.predict import predict_next_snapshot, similar_setups
 
 app = FastAPI(title="GEX Prediction API", version="2.0.0")
+app.include_router(agent_ui_router)
 app.include_router(llm_router)
 app.add_middleware(SecurityMiddleware)
 app.add_middleware(
@@ -42,8 +44,18 @@ app.add_middleware(
 
 
 @app.get("/")
-def root() -> dict[str, str]:
-    return {"status": "ok", "service": "gex-ai-api"}
+def root():
+    from fastapi.responses import JSONResponse
+
+    return JSONResponse(
+        {
+            "status": "ok",
+            "service": "gex-ai-api",
+            "agent_ui": "/agent",
+            "docs": "/docs",
+            "health": "/health",
+        }
+    )
 
 
 @app.get("/health")
