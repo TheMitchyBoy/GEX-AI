@@ -72,7 +72,20 @@ curl -X POST http://localhost:8000/llm/forecast/SPX \
 
 Without an API key, `/llm/forecast` falls back to the KNN baseline with rule-based narrative.
 
-Set `WRITE_PREDICTIONS=1` or pass `?persist=true` to log forecasts into `llm_predictions`.
+| GET | `/compare/{ticker}` | KNN vs LLM side-by-side |
+| GET | `/calibration/{ticker}` | Resolved prediction accuracy stats |
+| GET | `/insights/{ticker}` | Daily insights from `daily_insights` |
+| GET | `/metrics` | API request/latency counters |
+
+### Schema extensions
+
+Apply optional tables, dedupe index, and NOTIFY trigger:
+
+```bash
+psql $DATABASE_URL -f db/schema_extensions.sql
+```
+
+Or let the forecast poller call `ensure_extensions()` on startup.
 
 ### Run dashboard
 
