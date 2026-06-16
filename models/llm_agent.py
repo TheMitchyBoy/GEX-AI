@@ -26,32 +26,36 @@ from models.quant_fallback import quant_only_reply
 
 AGENT_MODES = ("fast", "deep", "quant")
 
-AGENT_SYSTEM_PROMPT = """You are the GEX Market Agent — an expert options analyst specializing in dealer gamma exposure (GEX).
+AGENT_SYSTEM_PROMPT = """You are a senior GEX (gamma exposure) analyst on an options trading desk — sharp, personable, and direct.
 
-You receive live Postgres GEX data: spot, net GEX, regime, gamma flip, call/put walls, term structure, flow/greeks, KNN/GBoost/ensemble quant forecasts, similar setups, session analogs, and forecast track record.
+You have live snapshot data attached below. Your job is to talk like you're briefing a colleague: natural, fluid, intelligent conversation — not a formatted report.
 
-## Domain playbooks
-- **LONG gamma / positive GEX:** dealers hedge against moves → mean reversion, dampened trends, pin toward positive-gamma magnets.
-- **SHORT gamma / negative GEX:** dealers amplify moves → trend extension, breaks accelerate, higher realized vol near flip.
-- **Spot below flip (short gamma territory):** upside moves can accelerate; flip acts as resistance magnet.
-- **Spot above flip (long gamma territory):** pullbacks toward flip are common; chop/pin behavior increases.
-- **0DTE-heavy (high zero_dte_ratio):** pin risk into close; charm matters more into final hour.
-- **FOMC/event weeks (is_fomc_week, event_risk_score):** widen uncertainty; cite event flags; reduce confidence.
+## How you communicate
+- Write in flowing paragraphs. Use bullets only when listing specific strikes or levels the user asked for.
+- Weave numbers into sentences naturally (e.g. "we're at 5,420, roughly 0.3% below flip at 5,436").
+- Match the user's tone — short question gets a concise answer; open-ended questions get richer context.
+- Follow the conversation thread. Refer to what you or the user said earlier when it helps.
+- Show reasoning as you go ("dealers are likely hedging into the move, which means…") rather than dumping labels.
+- It's fine to use plain language: "the thing to watch", "honestly", "what stands out to me".
 
-## Rules
-1. Ground every claim in provided JSON or tool results. Cite numbers: spot, flip, GEX (Bn$/1%), walls, confidence.
-2. Use model_agreement.score — if < 0.5, flag uncertainty; if >= 0.75, synthesize confidently.
-3. Use forecast_track_record to calibrate confidence. If sign_accuracy < 0.55 or n < 5, be more cautious.
-4. Distinguish facts vs forecasts. State confidence 0–1.
-5. Educational analysis only — not financial advice."""
+## What you know
+Live GEX: spot, regime, flip, walls, term structure, flow/greeks, quant forecasts, similar setups, session analogs.
+
+## Ground rules
+- Every claim must trace to the live data — cite key numbers but don't read like a JSON dump.
+- If model_agreement is low or track record is weak, say so conversationally.
+- Distinguish what's observed now vs what you're forecasting.
+- Educational analysis only — not financial advice."""
+
+CONVERSATIONAL_STYLE_ADDON = """Respond as natural dialogue. Do NOT use rigid section headers like "Current state" or "Base case" unless the user explicitly asks for a structured breakdown. End with a thought-provoking observation or question only when it genuinely helps — never force it."""
 
 STRUCTURED_OUTPUT_ADDON = """
-## Output format
-Respond with markdown using these sections:
-1. **Current state** — regime, spot vs flip, total GEX, key walls (with numbers)
-2. **Dealer positioning** — what hedging flow implies
-3. **Base case (10–30 min)** — direction, magnets, ΔGEX from quant/ensemble
-4. **Alternate scenario** — trigger level that flips the view
+## Output format (only when structured mode is enabled)
+Use these sections:
+1. **Current state** — regime, spot vs flip, total GEX, key walls
+2. **Dealer positioning** — hedging flow implications
+3. **Base case (10–30 min)** — direction, magnets, ΔGEX view
+4. **Alternate scenario** — what flips the view
 5. **Confidence** — 0–1 and what would change your mind"""
 
 FACTS_EXTRACTION_PROMPT = """Extract structured facts from the GEX context. Respond with ONLY valid JSON:
@@ -71,13 +75,13 @@ FACTS_EXTRACTION_PROMPT = """Extract structured facts from the GEX context. Resp
 }"""
 
 SUGGESTED_PROMPTS = [
-    "What's the current gamma regime and what does it imply for spot?",
-    "Where are the key support/resistance levels from GEX walls and flip?",
-    "Summarize the KNN and ensemble forecasts for the next 30 minutes.",
-    "What similar historical setups and sessions suggest about the next move?",
-    "Is there pin risk near spot? Which strikes matter most?",
-    "Explain the last GEX move — what strikes drove it?",
-    "How accurate have our recent forecasts been? Should we trust today's view?",
+    "What's the vibe right now — are dealers long or short gamma?",
+    "Walk me through where spot sits relative to flip and what that means.",
+    "Anything interesting in the quant forecasts for the next half hour?",
+    "Does today's setup remind you of any recent sessions?",
+    "Where's pin risk — which strikes matter most around here?",
+    "What drove the last GEX move?",
+    "How much should I trust our forecasts today?",
 ]
 
 
@@ -130,6 +134,10 @@ def build_agent_context(
     }
 
 
+def _agent_temperature() -> float:
+    return config.LLM_AGENT_TEMPERATURE
+
+
 def _system_prompt(bundle: dict[str, Any]) -> str:
     summary = bundle.get("summary") or {}
     parts = [AGENT_SYSTEM_PROMPT]
@@ -138,10 +146,36 @@ def _system_prompt(bundle: dict[str, Any]) -> str:
         parts.append(event_addon)
     if config.LLM_STRUCTURED_OUTPUT:
         parts.append(STRUCTURED_OUTPUT_ADDON)
+    elif config.LLM_CONVERSATIONAL:
+        parts.append(CONVERSATIONAL_STYLE_ADDON)
     agreement = bundle.get("model_agreement") or {}
     if agreement.get("notes"):
-        parts.append(f"## Model agreement\n{agreement['notes']} (score={agreement.get('score')})")
+        parts.append(f"Quant models: {agreement['notes']} (agreement={agreement.get('score')})")
     return "\n\n".join(parts)
+
+
+def _system_with_live_data(
+    bundle: dict[str, Any],
+    context_block: str,
+    calibration_note: str,
+) -> str:
+    return (
+        f"{_system_prompt(bundle)}\n\n"
+        f"[LIVE DATA — ground every claim in this; do not dump it verbatim]\n"
+        f"{context_block}\n\n"
+        f"[CALIBRATION NOTE]\n{calibration_note}"
+    )
+
+
+def _build_api_messages(messages: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Natural multi-turn history — live data stays in system prompt, not user messages."""
+    out: list[dict[str, str]] = []
+    for msg in messages:
+        role = msg.get("role", "user")
+        content = (msg.get("content") or "").strip()
+        if role in ("user", "assistant") and content:
+            out.append({"role": role, "content": content})
+    return out
 
 
 def _format_context_block(ctx: dict[str, Any], *, session_id: str | None = None, ticker: str | None = None) -> str:
@@ -236,7 +270,6 @@ def chat_with_agent(
             cached["from_cache"] = True
             return cached
 
-    system = _system_prompt(bundle)
     context_block = _format_context_block(ctx, session_id=session_id, ticker=ticker)
     tool_results: list[dict[str, Any]] = []
     user_question = messages[-1]["content"] if messages else ""
@@ -248,20 +281,28 @@ def chat_with_agent(
             ctx["extracted_facts"] = facts
             context_block = _format_context_block(ctx, session_id=session_id, ticker=ticker)
 
+    system = _system_with_live_data(bundle, context_block, calibration_note)
+
     if use_tools:
         runner = AgentToolRunner(history, lookback_days=lookback_days)
-        tool_messages = [{
-            "role": "user",
-            "content": (
-                f"{context_block}\n\n[CALIBRATION]\n{calibration_note}\n\n"
-                f"[USER_QUESTION]\n{user_question}\n\n"
-                "Call tools if you need fresher forecast, strikes, backtest, or KNN vs LLM comparison."
-            ),
-        }]
+        tool_messages = [
+            *_build_api_messages(messages[:-1]),
+            {
+                "role": "user",
+                "content": (
+                    f"{user_question}\n\n"
+                    "(Use tools if you need fresher forecast, strikes, backtest, or KNN vs LLM comparison.)"
+                ),
+            },
+        ]
         with timed_stage("tool_loop"):
             tool_reply, tool_err, tool_log = openai_chat_with_tools(
-                system, tool_messages, TOOL_SCHEMAS, runner.execute,
+                system,
+                tool_messages,
+                TOOL_SCHEMAS,
+                runner.execute,
                 model=model_for_task("tools"),
+                temperature=_agent_temperature(),
             )
         if tool_log:
             tool_results = tool_log
@@ -276,19 +317,15 @@ def chat_with_agent(
                 set_cached(ticker, str(ts), out, messages=messages, two_pass=two_pass, use_tools=use_tools, mode=mode)
             return out
 
-    api_messages: list[dict[str, str]] = []
-    for i, msg in enumerate(messages):
-        role = msg.get("role", "user")
-        content = msg.get("content", "")
-        if role not in ("user", "assistant"):
-            continue
-        if role == "user" and i == len(messages) - 1:
-            content = f"{context_block}\n\n[CALIBRATION]\n{calibration_note}\n\n[USER_QUESTION]\n{content}"
-        api_messages.append({"role": role, "content": content})
+    api_messages = _build_api_messages(messages)
 
     with timed_stage("final_answer"):
         reply, error = openai_chat(
-            system, api_messages, max_tokens=config.LLM_MAX_TOKENS, model=model_for_task("answer")
+            system,
+            api_messages,
+            max_tokens=config.LLM_MAX_TOKENS,
+            model=model_for_task("answer"),
+            temperature=_agent_temperature(),
         )
     out = _build_response(
         reply, ctx, messages, ticker, ts,
@@ -325,16 +362,17 @@ def stream_agent_reply(
             with timed_stage("build_agent_context"):
                 ctx = build_agent_context(history, lookback_days=lookback_days, for_chat=True)
         bundle = ctx.get("bundle") or {}
-        system = _system_prompt(bundle)
         context_block = _format_context_block(ctx, session_id=session_id, ticker=bundle.get("ticker"))
         calibration_note = _calibration_guidance(ctx)
-        user_question = messages[-1]["content"] if messages else ""
-        api_messages = [{
-            "role": "user",
-            "content": f"{context_block}\n\n[CALIBRATION]\n{calibration_note}\n\n[USER_QUESTION]\n{user_question}",
-        }]
+        system = _system_with_live_data(bundle, context_block, calibration_note)
+        api_messages = _build_api_messages(messages)
         with timed_stage("stream_answer"):
-            for token in openai_chat_stream(system, api_messages, model=model_for_task("answer")):
+            for token in openai_chat_stream(
+                system,
+                api_messages,
+                model=model_for_task("answer"),
+                temperature=_agent_temperature(),
+            ):
                 if token:
                     yield token
     except Exception as exc:
@@ -386,6 +424,7 @@ def _build_response(
             "tools_enabled": use_tools,
             "agent_fast_mode": config.LLM_AGENT_FAST,
             "structured_output": config.LLM_STRUCTURED_OUTPUT,
+            "conversational": config.LLM_CONVERSATIONAL,
             "estimated_tokens": ctx.get("estimated_tokens"),
             "has_track_record": bool(bundle.get("forecast_track_record")),
             "has_similar_sessions": bool(bundle.get("similar_sessions")),

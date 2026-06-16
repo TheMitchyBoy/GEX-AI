@@ -68,6 +68,8 @@ def llm_status() -> dict[str, Any]:
         "max_tool_rounds": config.LLM_MAX_TOOL_ROUNDS,
         "agent_fast_mode": config.LLM_AGENT_FAST,
         "structured_output": config.LLM_STRUCTURED_OUTPUT,
+        "conversational": config.LLM_CONVERSATIONAL,
+        "agent_temperature": config.LLM_AGENT_TEMPERATURE,
         "context_compress": config.LLM_CONTEXT_COMPRESS,
         "ensemble_enabled": config.ENSEMBLE_ENABLED,
         "modes": ["fast", "deep", "quant"],

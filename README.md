@@ -143,6 +143,8 @@ curl -X POST http://localhost:8000/llm/chat/SPX \
 
 The agent supports three modes: **fast** (default, 1 API call), **deep** (tools + two-pass), **quant** (no LLM).
 
+By default the agent uses **conversational** style — natural dialogue, not rigid report sections. Set `LLM_STRUCTURED_OUTPUT=1` to restore formatted breakdowns.
+
 | Feature | Env | Description |
 |---------|-----|-------------|
 | Rich context | `LLM_RICH_CONTEXT=1` | ATM strike band, cumulative GEX, quant synthesis, session analogs, forecast track record |
