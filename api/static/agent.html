@@ -132,6 +132,10 @@
     }
     button.send:disabled { opacity: 0.5; cursor: not-allowed; }
     .error { color: #f87171; font-size: 0.85rem; padding: 0 1.25rem 0.5rem; }
+    .warn { color: #fbbf24; font-size: 0.85rem; padding: 0 1.25rem 0.5rem; }
+    .msg.thinking { align-self: flex-start; background: var(--panel); border: 1px dashed var(--border); color: var(--muted); font-style: italic; }
+    @keyframes pulse { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
+    .msg.thinking { animation: pulse 1.5s ease-in-out infinite; }
     @media (max-width: 768px) {
       .layout { grid-template-columns: 1fr; }
       aside { display: none; }
@@ -156,6 +160,7 @@
     </aside>
     <main>
       <div id="messages"></div>
+      <div class="warn" id="warn"></div>
       <div class="error" id="error"></div>
       <div class="composer">
         <textarea id="input" rows="1" placeholder="Ask about regime, flip, walls, forecasts…"></textarea>
@@ -168,12 +173,35 @@
     const inputEl = document.getElementById('input');
     const sendBtn = document.getElementById('send');
     const errorEl = document.getElementById('error');
+    const warnEl = document.getElementById('warn');
     const statusEl = document.getElementById('status');
     const tickerEl = document.getElementById('ticker');
     const apiKeyEl = document.getElementById('apiKey');
     const promptsEl = document.getElementById('prompts');
 
     let history = [];
+    let thinkingEl = null;
+    const CHAT_TIMEOUT_MS = 120000;
+
+    function formatApiError(detail) {
+      if (!detail) return 'Request failed';
+      if (typeof detail === 'string') return detail;
+      if (Array.isArray(detail)) return detail.map(x => x.msg || JSON.stringify(x)).join('; ');
+      return String(detail);
+    }
+
+    function setThinking(on) {
+      if (on && !thinkingEl) {
+        thinkingEl = document.createElement('div');
+        thinkingEl.className = 'msg assistant thinking';
+        thinkingEl.textContent = 'Analyzing GEX context…';
+        messagesEl.appendChild(thinkingEl);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      } else if (!on && thinkingEl) {
+        thinkingEl.remove();
+        thinkingEl = null;
+      }
+    }
 
     function headers() {
       const h = { 'Content-Type': 'application/json' };
@@ -216,6 +244,13 @@
         const db = d.database_configured ? 'DB connected' : 'DB missing';
         const ts = d.latest_ts?.SPX || d.latest_ts?.[Object.keys(d.latest_ts||{})[0]] || '—';
         statusEl.textContent = `${db} · ${llm} · latest ${ts}`;
+        if (!d.llm_configured) {
+          warnEl.textContent = 'OPENAI_API_KEY is not set — agent cannot reply until you add it in Railway variables.';
+        } else if (!d.database_configured) {
+          warnEl.textContent = 'DATABASE_URL is not set — agent needs Postgres snapshot data.';
+        } else {
+          warnEl.textContent = '';
+        }
         (d.supported_tickers || ['SPX']).forEach(t => {
           const o = document.createElement('option');
           o.value = t; o.textContent = t;
@@ -248,18 +283,31 @@
       sendBtn.disabled = true;
       history.push({ role: 'user', content: text });
       addMessage('user', text);
+      setThinking(true);
 
       const key = apiKeyEl.value.trim();
       if (key) localStorage.setItem('gex_api_key', key);
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), CHAT_TIMEOUT_MS);
 
       try {
         const r = await fetch(`/llm/chat/${tickerEl.value}`, {
           method: 'POST',
           headers: headers(),
-          body: JSON.stringify({ messages: history, refresh_context: history.length <= 2 }),
+          signal: controller.signal,
+          body: JSON.stringify({
+            messages: history,
+            refresh_context: history.length <= 2,
+          }),
         });
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.detail || 'Request failed');
+        let d;
+        try {
+          d = await r.json();
+        } catch (_) {
+          throw new Error(r.status === 504 ? 'Request timed out — try a shorter question' : 'Invalid server response');
+        }
+        if (!r.ok) throw new Error(formatApiError(d.detail));
         const reply = d.reply || 'No response.';
         history.push({ role: 'assistant', content: reply });
         addMessage('assistant', reply, formatMeta(d));
@@ -268,10 +316,15 @@
           statusEl.textContent = `${base} · ctx ${d.context_summary.snapshot_ts}`;
         }
       } catch (e) {
-        errorEl.textContent = e.message;
-        addMessage('assistant', 'Sorry — ' + e.message);
+        const msg = e.name === 'AbortError'
+          ? 'Request timed out after 2 minutes — the server may still be processing. Try again.'
+          : e.message;
+        errorEl.textContent = msg;
+        addMessage('assistant', 'Sorry — ' + msg);
         history.pop();
       } finally {
+        clearTimeout(timer);
+        setThinking(false);
         sendBtn.disabled = false;
         inputEl.focus();
       }

@@ -68,7 +68,12 @@ SUGGESTED_PROMPTS = [
 ]
 
 
-def build_agent_context(history: list[dict[str, Any]], *, lookback_days: int | None = None) -> dict[str, Any]:
+def build_agent_context(
+    history: list[dict[str, Any]],
+    *,
+    lookback_days: int | None = None,
+    for_chat: bool = False,
+) -> dict[str, Any]:
     lookback_days = lookback_days if lookback_days is not None else config.LOOKBACK_DAYS
     bundle = build_context_bundle(
         history,
@@ -78,10 +83,12 @@ def build_agent_context(history: list[dict[str, Any]], *, lookback_days: int | N
     )
     llm_forecast = None
     horizons: dict[str, Any] = {}
-    try:
-        llm_forecast = generate_llm_forecast(history, lookback_days=lookback_days, persist=False)
-    except Exception:
-        pass
+    # Chat already calls OpenAI — skip a redundant forecast LLM round-trip (major latency win).
+    if not for_chat:
+        try:
+            llm_forecast = generate_llm_forecast(history, lookback_days=lookback_days, persist=False)
+        except Exception:
+            pass
     try:
         horizons = {str(k): v for k, v in predict_multi_horizon(history, lookback_days=lookback_days).items()}
     except Exception:
@@ -142,8 +149,10 @@ def chat_with_agent(
     two_pass: bool | None = None,
 ) -> dict[str, Any]:
     lookback_days = lookback_days if lookback_days is not None else config.LOOKBACK_DAYS
-    use_tools = config.LLM_USE_TOOLS if use_tools is None else use_tools
-    two_pass = config.LLM_TWO_PASS if two_pass is None else two_pass
+    if use_tools is None:
+        use_tools = False if config.LLM_AGENT_FAST else config.LLM_USE_TOOLS
+    if two_pass is None:
+        two_pass = False if config.LLM_AGENT_FAST else config.LLM_TWO_PASS
 
     if not is_llm_configured():
         return {"reply": None, "error": "OPENAI_API_KEY is not configured.", "context": None}
@@ -155,17 +164,24 @@ def chat_with_agent(
             "context": None,
         }
 
-    bundle = build_context_bundle(history, lookback_days=lookback_days, rich=config.LLM_RICH_CONTEXT)
+    ctx = context if context and not refresh_context else build_agent_context(
+        history, lookback_days=lookback_days, for_chat=True
+    )
+    bundle = ctx.get("bundle") or {}
     ts = bundle.get("snapshot_ts")
     ticker = bundle.get("ticker", config.DEFAULT_TICKER)
 
     if ts and refresh_context:
         cached = get_cached(str(ticker), str(ts))
-        if cached and cached.get("message_count") == len(messages):
+        if (
+            cached
+            and cached.get("message_count") == len(messages)
+            and cached.get("two_pass") == two_pass
+            and cached.get("use_tools") == use_tools
+        ):
             cached["from_cache"] = True
             return cached
 
-    ctx = context if context and not refresh_context else build_agent_context(history, lookback_days=lookback_days)
     context_block = _format_context_block(ctx)
     tool_results: list[dict[str, Any]] = []
 
@@ -202,7 +218,10 @@ def chat_with_agent(
             tool_results = tool_log
             ctx["tool_results"] = tool_results
         if tool_reply and not tool_err:
-            out = _build_response(tool_reply, ctx, messages, ticker, ts, tool_results=tool_results)
+            out = _build_response(
+                tool_reply, ctx, messages, ticker, ts,
+                tool_results=tool_results, two_pass=two_pass, use_tools=use_tools,
+            )
             if ts:
                 set_cached(str(ticker), str(ts), out)
             return out
@@ -221,7 +240,10 @@ def chat_with_agent(
         api_messages.append({"role": role, "content": content})
 
     reply, error = openai_chat(AGENT_SYSTEM_PROMPT, api_messages, max_tokens=config.LLM_MAX_TOKENS)
-    out = _build_response(reply, ctx, messages, ticker, ts, error=error, tool_results=tool_results)
+    out = _build_response(
+        reply, ctx, messages, ticker, ts,
+        error=error, tool_results=tool_results, two_pass=two_pass, use_tools=use_tools,
+    )
     if ts and reply:
         set_cached(str(ticker), str(ts), out)
     return out
@@ -236,6 +258,8 @@ def _build_response(
     *,
     error: str | None = None,
     tool_results: list[dict[str, Any]] | None = None,
+    two_pass: bool = False,
+    use_tools: bool = False,
 ) -> dict[str, Any]:
     return {
         "reply": reply,
@@ -245,12 +269,14 @@ def _build_response(
         "message_count": len(messages),
         "ticker": ticker,
         "snapshot_ts": ts,
-        "two_pass": config.LLM_TWO_PASS,
+        "two_pass": two_pass,
+        "use_tools": use_tools,
         "tools_used": [t.get("tool") for t in (tool_results or [])],
         "intelligence": {
             "rich_context": config.LLM_RICH_CONTEXT,
-            "two_pass": config.LLM_TWO_PASS,
-            "tools_enabled": config.LLM_USE_TOOLS,
+            "two_pass": two_pass,
+            "tools_enabled": use_tools,
+            "agent_fast_mode": config.LLM_AGENT_FAST,
             "estimated_tokens": ctx.get("estimated_tokens"),
             "has_track_record": bool((ctx.get("bundle") or {}).get("forecast_track_record")),
             "has_similar_sessions": bool((ctx.get("bundle") or {}).get("similar_sessions")),

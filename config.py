@@ -30,6 +30,8 @@ LLM_TWO_PASS = os.environ.get("LLM_TWO_PASS", "1") in ("1", "true", "True")
 LLM_USE_TOOLS = os.environ.get("LLM_USE_TOOLS", "1") in ("1", "true", "True")
 LLM_RICH_CONTEXT = os.environ.get("LLM_RICH_CONTEXT", "1") in ("1", "true", "True")
 LLM_MAX_TOOL_ROUNDS = int(os.environ.get("LLM_MAX_TOOL_ROUNDS", "2"))
+LLM_AGENT_FAST = os.environ.get("LLM_AGENT_FAST", "1") in ("1", "true", "True")
+LLM_AGENT_TIMEOUT_SEC = int(os.environ.get("LLM_AGENT_TIMEOUT_SEC", "120"))
 
 API_KEY = os.environ.get("API_KEY", "")
 RATE_LIMIT_PER_MIN = int(os.environ.get("RATE_LIMIT_PER_MIN", "120"))

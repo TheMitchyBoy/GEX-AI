@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -14,6 +15,8 @@ from db.queries import fetch_llm_predictions
 from models.llm_client import is_llm_configured
 from models.llm_predict import generate_llm_forecast
 from models.llm_agent import SUGGESTED_PROMPTS, chat_with_agent
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/llm", tags=["llm"])
 
@@ -51,6 +54,7 @@ def llm_status() -> dict[str, Any]:
         "use_tools": config.LLM_USE_TOOLS,
         "rich_context": config.LLM_RICH_CONTEXT,
         "max_tool_rounds": config.LLM_MAX_TOOL_ROUNDS,
+        "agent_fast_mode": config.LLM_AGENT_FAST,
     }
 
 
@@ -122,21 +126,29 @@ def agent_prompts() -> dict[str, Any]:
 @router.post("/chat/{ticker}")
 def agent_chat(ticker: str, body: AgentChatRequest) -> dict[str, Any]:
     require_database_url()
-    history = load_snapshot_history(ticker.upper(), lookback_days=body.lookback_days)
+    try:
+        history = load_snapshot_history(ticker.upper(), lookback_days=body.lookback_days)
+    except Exception as exc:
+        logger.exception("Failed to load history for agent chat")
+        raise HTTPException(status_code=503, detail=f"Database error: {exc}") from exc
     if len(history) < config.MIN_KNN_SNAPSHOTS:
         raise HTTPException(
             status_code=422,
             detail=f"Insufficient data: need at least {config.MIN_KNN_SNAPSHOTS} snapshots",
         )
     messages = [{"role": m.role, "content": m.content} for m in body.messages]
-    result = chat_with_agent(
-        history,
-        messages,
-        lookback_days=body.lookback_days,
-        refresh_context=body.refresh_context,
-        use_tools=body.use_tools,
-        two_pass=body.two_pass,
-    )
+    try:
+        result = chat_with_agent(
+            history,
+            messages,
+            lookback_days=body.lookback_days,
+            refresh_context=body.refresh_context,
+            use_tools=body.use_tools,
+            two_pass=body.two_pass,
+        )
+    except Exception as exc:
+        logger.exception("Agent chat failed for %s", ticker)
+        raise HTTPException(status_code=500, detail=f"Agent error: {exc}") from exc
     if result.get("error") and not result.get("reply"):
         raise HTTPException(status_code=503, detail=result["error"])
     return {
