@@ -121,12 +121,14 @@ When `OPTION_LEARN_ON_POLL=1` (default), the forecast worker also runs an option
 **90-day backfill** (bootstrap model without waiting for live cycles):
 
 ```bash
-# In Railway shell — recommended (may take several minutes)
-python3 scripts/backfill_option_quotes.py SPX --lookback-days 90
+# Fast — no UW API, uses GEX snapshots only (recommended if you hit 429 rate limits)
+python3 scripts/backfill_option_quotes.py SPX --lookback-days 90 --step 3 --gex-only
 
-# Faster: every 3rd snapshot (~1/3 API calls)
+# Full UW historical (slow; may hit rate limits — falls back to GEX-proxy per day on 429)
 python3 scripts/backfill_option_quotes.py SPX --lookback-days 90 --step 3
 ```
+
+Set `UW_BACKFILL_SLEEP_SEC=2` and `OPTION_BACKFILL_MAX_UW_DAYS=5` to throttle UW calls per run.
 
 Uses GEX snapshots from Postgres + UW **option-chains** (per day) and **intraday** bars per contract. Falls back to UW historic daily, then GEX-proxy mids if UW data is missing (`OPTION_BACKFILL_GEX_PROXY=1`). Trains River models automatically at the end.
 

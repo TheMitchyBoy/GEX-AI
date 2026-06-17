@@ -117,6 +117,14 @@ def fetch_option_quotes(
         return list(cur.fetchall())
 
 
+def fetch_existing_quote_ts(conn: psycopg.Connection, ticker: str) -> set[str]:
+    rows = conn.execute(
+        "SELECT DISTINCT quote_ts FROM option_quotes WHERE ticker = %s",
+        (ticker.upper(),),
+    ).fetchall()
+    return {str(r[0]) for r in rows}
+
+
 def fetch_latest_option_quotes(conn: psycopg.Connection, ticker: str) -> list[dict[str, Any]]:
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(

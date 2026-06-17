@@ -85,7 +85,10 @@ OPTION_MIN_UPDATES = int(os.environ.get("OPTION_MIN_UPDATES", "15"))
 OPTION_BACKFILL_LOOKBACK_DAYS = int(os.environ.get("OPTION_BACKFILL_LOOKBACK_DAYS", "90"))
 OPTION_BACKFILL_STEP = int(os.environ.get("OPTION_BACKFILL_STEP", "1"))
 OPTION_BACKFILL_GEX_PROXY = os.environ.get("OPTION_BACKFILL_GEX_PROXY", "1") in ("1", "true", "True")
-UW_BACKFILL_SLEEP_SEC = float(os.environ.get("UW_BACKFILL_SLEEP_SEC", "0.35"))
+UW_BACKFILL_SLEEP_SEC = float(os.environ.get("UW_BACKFILL_SLEEP_SEC", "1.5"))
+UW_MAX_RETRIES = int(os.environ.get("UW_MAX_RETRIES", "6"))
+UW_RETRY_BASE_SEC = float(os.environ.get("UW_RETRY_BASE_SEC", "2.0"))
+OPTION_BACKFILL_MAX_UW_DAYS = int(os.environ.get("OPTION_BACKFILL_MAX_UW_DAYS", "0"))  # 0 = no limit
 
 MIN_KNN_SNAPSHOTS = 4
 RECENCY_DECAY = 0.92

@@ -102,9 +102,11 @@ def backfill_options(
     lookback_days: int = config.OPTION_BACKFILL_LOOKBACK_DAYS,
     step: int = config.OPTION_BACKFILL_STEP,
     train: bool = True,
+    gex_only: bool = False,
+    resume: bool = True,
 ) -> dict[str, Any]:
     """Backfill option_quotes from GEX history + UW intraday (default 90 days)."""
-    if not is_configured():
+    if not gex_only and not is_configured():
         raise HTTPException(status_code=503, detail="UW_API_KEY is not set")
     require_database_url()
     try:
@@ -113,6 +115,8 @@ def backfill_options(
             lookback_days=lookback_days,
             step=step,
             train=train,
+            gex_only=gex_only,
+            resume=resume,
         )
         if not result.get("ok"):
             raise HTTPException(status_code=422, detail=result.get("error", "backfill failed"))

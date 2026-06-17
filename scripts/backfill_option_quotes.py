@@ -21,6 +21,8 @@ def main() -> int:
     parser.add_argument("ticker", nargs="?", default=config.DEFAULT_TICKER)
     parser.add_argument("--lookback-days", type=int, default=config.OPTION_BACKFILL_LOOKBACK_DAYS)
     parser.add_argument("--step", type=int, default=config.OPTION_BACKFILL_STEP, help="Use every Nth snapshot")
+    parser.add_argument("--gex-only", action="store_true", help="No UW API calls — GEX proxy mids only (fast, no 429)")
+    parser.add_argument("--no-resume", action="store_true", help="Re-process snapshots already in option_quotes")
     parser.add_argument("--no-train", action="store_true")
     args = parser.parse_args()
 
@@ -29,6 +31,8 @@ def main() -> int:
         lookback_days=args.lookback_days,
         step=args.step,
         train=not args.no_train,
+        gex_only=args.gex_only,
+        resume=not args.no_resume,
     )
     print(json.dumps(result, indent=2))
     return 0 if result.get("ok") else 1

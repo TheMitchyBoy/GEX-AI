@@ -33,5 +33,14 @@ def test_backfill_no_snapshots():
         gc.return_value.__enter__.return_value = mock_conn
         with patch("services.option_backfill.fetch_snapshots", return_value=[]):
             with patch("services.option_backfill.is_configured", return_value=True):
-                result = backfill_option_quotes("SPX", lookback_days=7, train=False)
+                result = backfill_option_quotes("SPX", lookback_days=7, train=False, gex_only=True)
     assert result["ok"] is False
+
+
+def test_build_synthetic_occ_symbol():
+    from integrations.uw_client import build_synthetic_occ_symbol, parse_option_symbol
+
+    sym = build_synthetic_occ_symbol("SPXW", "2026-06-16", 7510.0, "call")
+    parsed = parse_option_symbol(sym)
+    assert parsed is not None
+    assert parsed["strike"] == 7510.0

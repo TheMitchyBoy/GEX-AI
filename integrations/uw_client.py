@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from datetime import datetime
 from typing import Any
 
@@ -77,10 +78,33 @@ class UnusualWhalesClient:
         if not self.api_key:
             raise RuntimeError("UW_API_KEY is not set")
         url = f"{self.base_url}{path}"
-        with httpx.Client(timeout=self.timeout) as client:
-            r = client.get(url, headers=self._headers(), params=params)
-            r.raise_for_status()
-            return r.json()
+        last_exc: Exception | None = None
+        for attempt in range(config.UW_MAX_RETRIES):
+            try:
+                with httpx.Client(timeout=self.timeout) as client:
+                    r = client.get(url, headers=self._headers(), params=params)
+                    if r.status_code == 429:
+                        retry_after = r.headers.get("Retry-After")
+                        wait = float(retry_after) if retry_after else config.UW_RETRY_BASE_SEC * (2**attempt)
+                        logger.warning("UW 429 on %s — retry in %.1fs (attempt %s)", path, wait, attempt + 1)
+                        time.sleep(wait)
+                        continue
+                    r.raise_for_status()
+                    return r.json()
+            except httpx.HTTPStatusError as exc:
+                last_exc = exc
+                if exc.response.status_code == 429 and attempt < config.UW_MAX_RETRIES - 1:
+                    wait = config.UW_RETRY_BASE_SEC * (2**attempt)
+                    time.sleep(wait)
+                    continue
+                raise
+            except Exception as exc:
+                last_exc = exc
+                if attempt < config.UW_MAX_RETRIES - 1:
+                    time.sleep(config.UW_RETRY_BASE_SEC * (2**attempt))
+                    continue
+                raise
+        raise RuntimeError(f"UW request failed after retries: {path}") from last_exc
 
     def option_contracts(
         self,
@@ -262,3 +286,14 @@ def synthetic_atm_mid(spot: float, option_type: str, *, dte: int = 7) -> float:
     t = max(dte, 1) / 30.0
     base = max(spot * 0.0015 * (t**0.5), 0.05)
     return base if option_type == "call" else base * 0.95
+
+
+def atm_strike_for_spot(spot: float, step: float = 5.0) -> float:
+    return round(spot / step) * step
+
+
+def build_synthetic_occ_symbol(root: str, expiry: str, strike: float, option_type: str) -> str:
+    yymmdd = expiry[2:4] + expiry[5:7] + expiry[8:10]
+    cp = "C" if option_type == "call" else "P"
+    strike_int = int(round(strike * 1000))
+    return f"{root.upper()}{yymmdd}{cp}{strike_int:08d}"
