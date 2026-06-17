@@ -9,6 +9,7 @@ from typing import Any
 import config
 from db.connection import get_connection
 from db.option_queries import (
+    ensure_option_schema,
     fetch_latest_option_quotes,
     fetch_option_quotes,
     gex_at_strike,
@@ -16,7 +17,7 @@ from db.option_queries import (
     upsert_option_quote,
     utc_now_iso,
 )
-from db.queries import ensure_extensions, fetch_latest_snapshot
+from db.queries import fetch_latest_snapshot
 from integrations.uw_client import (
     UnusualWhalesClient,
     contract_mid,
@@ -56,7 +57,7 @@ def ingest_uw_quotes(ticker: str, *, client: UnusualWhalesClient | None = None) 
     quote_ts = utc_now_iso()
 
     with get_connection() as conn:
-        ensure_extensions(conn)
+        ensure_option_schema(conn)
         snapshot = fetch_latest_snapshot(conn, ticker)
         if not snapshot:
             return {"ok": False, "error": f"No GEX snapshots for {ticker}"}
@@ -107,6 +108,15 @@ def ingest_uw_quotes(ticker: str, *, client: UnusualWhalesClient | None = None) 
 
         conn.commit()
 
+    if not stored:
+        return {
+            "ok": False,
+            "error": "No parseable ATM contracts with valid mid price from UW",
+            "expiry": expiry,
+            "uw_ticker": uw_ticker,
+            "contracts_seen": len(contracts),
+        }
+
     return {
         "ok": True,
         "ticker": ticker,
@@ -124,7 +134,7 @@ def learn_from_db(ticker: str, slot: str = "atm_call") -> dict[str, Any]:
         return {"ok": False, "error": "OPTION_LEARN_ENABLED=0"}
     ticker = ticker.upper()
     with get_connection() as conn:
-        ensure_extensions(conn)
+        ensure_option_schema(conn)
         quotes = fetch_option_quotes(conn, ticker, slot=slot, limit=1000)
     if len(quotes) < 2:
         return {"ok": False, "error": "Need at least 2 option quotes — run ingest first", "n": len(quotes)}
@@ -139,7 +149,7 @@ def predict_option_moves(ticker: str) -> dict[str, Any]:
     """Predict next-interval Δmid for latest ATM call/put quotes."""
     ticker = ticker.upper()
     with get_connection() as conn:
-        ensure_extensions(conn)
+        ensure_option_schema(conn)
         latest = fetch_latest_option_quotes(conn, ticker)
         snapshot = fetch_latest_snapshot(conn, ticker)
         if not latest:

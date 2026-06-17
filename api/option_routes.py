@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -11,6 +12,8 @@ from db.connection import require_database_url
 from integrations.uw_client import is_configured
 from models.option_learn import model_status
 from services.option_pipeline import ingest_uw_quotes, learn_from_db, predict_option_moves, run_option_cycle
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/options", tags=["options"])
 
@@ -69,4 +72,8 @@ def full_cycle(ticker: str) -> dict[str, Any]:
     if not is_configured():
         raise HTTPException(status_code=503, detail="UW_API_KEY is not set")
     require_database_url()
-    return run_option_cycle(ticker.upper())
+    try:
+        return run_option_cycle(ticker.upper())
+    except Exception as exc:
+        logger.exception("Option cycle failed for %s", ticker)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc

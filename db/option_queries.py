@@ -4,10 +4,25 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import psycopg
 from psycopg.rows import dict_row
+
+_OPTION_SCHEMA = (Path(__file__).resolve().parent / "option_schema.sql").read_text()
+
+
+def ensure_option_schema(conn: psycopg.Connection) -> None:
+    """Create option_quotes tables only (isolated from full schema_extensions)."""
+    for stmt in _OPTION_SCHEMA.split(";"):
+        stmt = stmt.strip()
+        if stmt and not stmt.startswith("--"):
+            try:
+                conn.execute(stmt)
+                conn.commit()
+            except psycopg.Error:
+                conn.rollback()
 
 
 def utc_now_iso() -> str:

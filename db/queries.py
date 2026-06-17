@@ -22,6 +22,7 @@ def get_row_counts(conn: psycopg.Connection) -> dict[str, int]:
             row = conn.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()
             counts[table] = int(row[0]) if row else 0
         except psycopg.Error:
+            conn.rollback()
             counts[table] = -1
     return counts
 
@@ -353,6 +354,6 @@ def ensure_extensions(conn):
         if stmt and not stmt.startswith("--"):
             try:
                 conn.execute(stmt)
+                conn.commit()
             except psycopg.Error:
-                pass
-    conn.commit()
+                conn.rollback()
