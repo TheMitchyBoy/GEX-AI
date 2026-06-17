@@ -16,6 +16,7 @@ RUN chmod +x scripts/start_web.sh scripts/start_dashboard.sh scripts/start_agent
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONPATH=/app
 
 # Railway sets PORT at runtime
 EXPOSE 8000

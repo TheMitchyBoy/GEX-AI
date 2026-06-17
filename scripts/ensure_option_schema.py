@@ -4,9 +4,15 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
+
+# Allow: python3 scripts/ensure_option_schema.py from /app
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 from db.connection import get_connection
-from db.option_queries import ensure_option_schema, _option_tables_exist
+from db.option_queries import _option_tables_exist, ensure_option_schema
 
 
 def main() -> int:
