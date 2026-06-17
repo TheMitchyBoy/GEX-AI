@@ -10,19 +10,39 @@ from typing import Any
 import psycopg
 from psycopg.rows import dict_row
 
-_OPTION_SCHEMA = (Path(__file__).resolve().parent / "option_schema.sql").read_text()
+_OPTION_SCHEMA_PATH = Path(__file__).resolve().parent / "option_schema.sql"
+
+
+def _option_schema_statements() -> list[str]:
+    lines: list[str] = []
+    for line in _OPTION_SCHEMA_PATH.read_text().splitlines():
+        if line.strip().startswith("--"):
+            continue
+        lines.append(line)
+    return [s.strip() for s in "\n".join(lines).split(";") if s.strip()]
+
+
+def _option_tables_exist(conn: psycopg.Connection) -> bool:
+    row = conn.execute("SELECT to_regclass('public.option_quotes')").fetchone()
+    return bool(row and row[0])
 
 
 def ensure_option_schema(conn: psycopg.Connection) -> None:
     """Create option_quotes tables only (isolated from full schema_extensions)."""
-    for stmt in _OPTION_SCHEMA.split(";"):
-        stmt = stmt.strip()
-        if stmt and not stmt.startswith("--"):
-            try:
-                conn.execute(stmt)
-                conn.commit()
-            except psycopg.Error:
-                conn.rollback()
+    if _option_tables_exist(conn):
+        return
+    errors: list[str] = []
+    for stmt in _option_schema_statements():
+        try:
+            conn.execute(stmt)
+            conn.commit()
+        except psycopg.Error as exc:
+            conn.rollback()
+            errors.append(str(exc).strip())
+    if not _option_tables_exist(conn):
+        hint = "Run: python3 scripts/ensure_option_schema.py"
+        detail = "; ".join(errors) if errors else "unknown error"
+        raise RuntimeError(f"option_quotes table could not be created ({detail}). {hint}")
 
 
 def utc_now_iso() -> str:

@@ -20,13 +20,41 @@ router = APIRouter(prefix="/options", tags=["options"])
 
 @router.get("/status")
 def options_status() -> dict[str, Any]:
+    tables_ok = False
+    if config.DATABASE_URL:
+        try:
+            from db.connection import get_connection
+            from db.option_queries import _option_tables_exist
+
+            with get_connection() as conn:
+                tables_ok = _option_tables_exist(conn)
+        except Exception:
+            tables_ok = False
     return {
         "uw_configured": is_configured(),
         "learn_enabled": config.OPTION_LEARN_ENABLED,
         "poll_on_forecast": config.OPTION_LEARN_ON_POLL,
         "min_updates": config.OPTION_MIN_UPDATES,
         "supported_tickers": config.SUPPORTED_TICKERS,
+        "option_tables_ready": tables_ok,
     }
+
+
+@router.post("/migrate")
+def migrate_option_schema() -> dict[str, Any]:
+    """Create option_quotes tables (idempotent)."""
+    require_database_url()
+    try:
+        from db.connection import get_connection
+        from db.option_queries import ensure_option_schema, _option_tables_exist
+
+        with get_connection() as conn:
+            ensure_option_schema(conn)
+            ready = _option_tables_exist(conn)
+        return {"ok": ready, "message": "option_quotes ready" if ready else "migration failed"}
+    except Exception as exc:
+        logger.exception("Option schema migration failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.get("/learn/{ticker}/status")
