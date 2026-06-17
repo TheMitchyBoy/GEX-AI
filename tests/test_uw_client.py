@@ -37,3 +37,8 @@ def test_pick_atm_contracts():
 def test_nearest_expiry():
     exp = {"2026-06-10": 1.0, "2026-06-17": 2.0, "2026-06-20": 3.0}
     assert nearest_expiry(exp, "2026-06-15") == "2026-06-17"
+
+
+def test_nearest_expiry_datetime_keys():
+    exp = {"2026-06-16 00:00:00": 1.0, "2026-06-20 00:00:00": 2.0}
+    assert nearest_expiry(exp, "2026-06-16") == "2026-06-16"

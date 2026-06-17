@@ -148,12 +148,22 @@ def pick_atm_contracts(
     return out
 
 
+def _normalize_date_key(key: Any) -> str:
+    """Normalize expiration_json keys to YYYY-MM-DD for UW API."""
+    s = str(key).strip()
+    if " " in s:
+        s = s.split(" ", 1)[0]
+    if "T" in s:
+        s = s.split("T", 1)[0]
+    return s[:10]
+
+
 def nearest_expiry(expiration_json: dict[str, Any] | None, market_date: str | None = None) -> str | None:
     if not expiration_json:
         return None
-    dates = sorted(str(k) for k in expiration_json.keys())
+    dates = sorted({_normalize_date_key(k) for k in expiration_json.keys()})
     if not dates:
         return None
-    ref = market_date or datetime.utcnow().strftime("%Y-%m-%d")
+    ref = _normalize_date_key(market_date or datetime.utcnow().strftime("%Y-%m-%d"))
     future = [d for d in dates if d >= ref]
     return future[0] if future else dates[-1]

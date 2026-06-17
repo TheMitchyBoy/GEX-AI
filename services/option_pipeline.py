@@ -67,6 +67,8 @@ def ingest_uw_quotes(ticker: str, *, client: UnusualWhalesClient | None = None) 
 
         try:
             contracts = client.option_contracts(uw_ticker, expiry=expiry)
+            if not contracts:
+                contracts = client.option_contracts(uw_ticker)
         except Exception as exc:
             logger.exception("UW option-contracts failed for %s", uw_ticker)
             return {"ok": False, "error": str(exc)}
