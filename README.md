@@ -95,6 +95,7 @@ Endpoints:
 | POST | `/options/learn/{ticker}` | Train/increment River option Δmid model |
 | GET | `/options/forecast/{ticker}` | Predict next-interval option mid move |
 | POST | `/options/cycle/{ticker}` | Ingest → learn → predict in one call |
+| POST | `/options/backfill/{ticker}` | Backfill from GEX history + UW (use script for 90d) |
 
 ### Option price learning (DB + Unusual Whales)
 
@@ -116,6 +117,18 @@ python jobs/option_learn_poll.py
 ```
 
 When `OPTION_LEARN_ON_POLL=1` (default), the forecast worker also runs an option cycle on each new snapshot.
+
+**90-day backfill** (bootstrap model without waiting for live cycles):
+
+```bash
+# In Railway shell — recommended (may take several minutes)
+python3 scripts/backfill_option_quotes.py SPX --lookback-days 90
+
+# Faster: every 3rd snapshot (~1/3 API calls)
+python3 scripts/backfill_option_quotes.py SPX --lookback-days 90 --step 3
+```
+
+Uses GEX snapshots from Postgres + UW **option-chains** (per day) and **intraday** bars per contract. Falls back to UW historic daily, then GEX-proxy mids if UW data is missing (`OPTION_BACKFILL_GEX_PROXY=1`). Trains River models automatically at the end.
 
 | Env | Default | Description |
 |-----|---------|-------------|

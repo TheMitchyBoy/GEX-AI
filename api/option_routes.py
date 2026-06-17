@@ -11,6 +11,7 @@ import config
 from db.connection import require_database_url
 from integrations.uw_client import is_configured
 from models.option_learn import model_status
+from services.option_backfill import backfill_option_quotes
 from services.option_pipeline import ingest_uw_quotes, learn_from_db, predict_option_moves, run_option_cycle
 
 logger = logging.getLogger(__name__)
@@ -93,6 +94,34 @@ def forecast_options(ticker: str) -> dict[str, Any]:
     if not result.get("ok"):
         raise HTTPException(status_code=422, detail=result.get("error", "forecast failed"))
     return result
+
+
+@router.post("/backfill/{ticker}")
+def backfill_options(
+    ticker: str,
+    lookback_days: int = config.OPTION_BACKFILL_LOOKBACK_DAYS,
+    step: int = config.OPTION_BACKFILL_STEP,
+    train: bool = True,
+) -> dict[str, Any]:
+    """Backfill option_quotes from GEX history + UW intraday (default 90 days)."""
+    if not is_configured():
+        raise HTTPException(status_code=503, detail="UW_API_KEY is not set")
+    require_database_url()
+    try:
+        result = backfill_option_quotes(
+            ticker.upper(),
+            lookback_days=lookback_days,
+            step=step,
+            train=train,
+        )
+        if not result.get("ok"):
+            raise HTTPException(status_code=422, detail=result.get("error", "backfill failed"))
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Option backfill failed for %s", ticker)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.post("/cycle/{ticker}")

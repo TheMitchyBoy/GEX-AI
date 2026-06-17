@@ -82,6 +82,10 @@ OPTION_LEARN_ON_POLL = os.environ.get("OPTION_LEARN_ON_POLL", "1") in ("1", "tru
 OPTION_POLL_SEC = int(os.environ.get("OPTION_POLL_SEC", os.environ.get("FORECAST_POLL_SEC", "60")))
 OPTION_MIN_TRAIN_ROWS = int(os.environ.get("OPTION_MIN_TRAIN_ROWS", "12"))
 OPTION_MIN_UPDATES = int(os.environ.get("OPTION_MIN_UPDATES", "15"))
+OPTION_BACKFILL_LOOKBACK_DAYS = int(os.environ.get("OPTION_BACKFILL_LOOKBACK_DAYS", "90"))
+OPTION_BACKFILL_STEP = int(os.environ.get("OPTION_BACKFILL_STEP", "1"))
+OPTION_BACKFILL_GEX_PROXY = os.environ.get("OPTION_BACKFILL_GEX_PROXY", "1") in ("1", "true", "True")
+UW_BACKFILL_SLEEP_SEC = float(os.environ.get("UW_BACKFILL_SLEEP_SEC", "0.35"))
 
 MIN_KNN_SNAPSHOTS = 4
 RECENCY_DECAY = 0.92

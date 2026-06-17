@@ -135,7 +135,7 @@ def learn_from_db(ticker: str, slot: str = "atm_call") -> dict[str, Any]:
     ticker = ticker.upper()
     with get_connection() as conn:
         ensure_option_schema(conn)
-        quotes = fetch_option_quotes(conn, ticker, slot=slot, limit=1000)
+        quotes = fetch_option_quotes(conn, ticker, slot=slot, limit=20000)
     if len(quotes) < 2:
         return {"ok": False, "error": "Need at least 2 option quotes — run ingest first", "n": len(quotes)}
 
